@@ -25,13 +25,13 @@ def main():
         country=str(x.get('country') or '').strip() or None
         con.execute("""
           INSERT INTO securities (ticker,name,sector,industry,country,tracked,source,updated_at)
-          VALUES (?,?,?,?,?,TRUE,'nasdaq_screener',now())
+          VALUES (?,?,?,?,?,FALSE,'nasdaq_screener',now())
           ON CONFLICT (ticker) DO UPDATE SET
             name=coalesce(excluded.name,securities.name),
             sector=coalesce(excluded.sector,securities.sector),
             industry=coalesce(excluded.industry,securities.industry),
             country=coalesce(excluded.country,securities.country),
-            tracked=TRUE,source='nasdaq_screener',updated_at=now()
+            source='nasdaq_screener',updated_at=now()
         """,[ticker,name,sector,industry,country]); count+=1
     con.close(); print('universe',count)
 
