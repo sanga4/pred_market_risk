@@ -10,6 +10,7 @@ on:
       - "pipeline.py"
       - "enrich.py"
       - "backfill.py"
+      - "universe.py"
       - "schema.sql"
       - ".github/workflows/models.yml"
 
@@ -35,6 +36,9 @@ jobs:
         env: &md
           DB: md:geo_odds
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      - name: Refresh security universe
+        run: python universe.py
+        env: *md
       - name: Enrich Polymarket metadata
         run: python enrich.py
         env: *md
