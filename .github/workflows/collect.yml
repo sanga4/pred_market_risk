@@ -1,25 +1,43 @@
-name: collect
+name: collect-and-refresh
 
 on:
   schedule:
-    - cron: "7,22,37,52 * * * *"   # UTC; GitHub may delay runs
-  workflow_dispatch:          # manual "Run workflow" button
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "collector.py"
+      - "pipeline.py"
+      - "migrate.py"
+      - "schema.sql"
+      - ".github/workflows/collect.yml"
 
 concurrency:
-  group: collect
+  group: collect-and-refresh
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install requests pyarrow duckdb
-      - run: python collector.py
-        env:
+      - run: pip install -r requirements.txt
+      - name: Migrate additive schema
+        run: python migrate.py
+        env: &md
           DB: md:geo_odds
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      - name: Collect prediction markets
+        run: python collector.py
+        env: *md
+      - name: Refresh event features
+        run: python pipeline.py markets
+        env: *md

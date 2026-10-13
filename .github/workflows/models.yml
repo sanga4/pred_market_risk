@@ -1,0 +1,50 @@
+name: enrich-and-model
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "pipeline.py"
+      - "enrich.py"
+      - "backfill.py"
+      - "universe.py"
+      - "schema.sql"
+      - ".github/workflows/models.yml"
+
+concurrency:
+  group: enrich-and-model
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Migrate additive schema
+        run: python migrate.py
+        env: &md
+          DB: md:geo_odds
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      - name: Refresh security universe
+        run: python universe.py
+        env: *md
+      - name: Enrich Polymarket metadata
+        run: python enrich.py
+        env: *md
+      - name: Backfill probability history
+        run: python backfill.py
+        env: *md
+      - name: Refresh prices, relevance and coefficients
+        run: python pipeline.py models
+        env: *md
