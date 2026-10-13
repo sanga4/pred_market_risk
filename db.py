@@ -1,7 +1,7 @@
 import os
 import duckdb
 
-DB = os.getenv("DB", "md:geo_odds")
+DB = os.getenv("DB", "md:event_risk")
 
 
 def connect(read_only=False):
