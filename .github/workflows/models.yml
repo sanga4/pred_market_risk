@@ -1,22 +1,7 @@
-name: enrich-and-model
+name: enrich-and-model-fallback
 
 on:
-  schedule:
-    - cron: "17 * * * *"
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "pipeline.py"
-      - "enrich.py"
-      - "backfill.py"
-      - "universe.py"
-      - "schema.sql"
-      - ".github/workflows/models.yml"
-
-concurrency:
-  group: enrich-and-model
-  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -31,14 +16,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Migrate additive schema
-        run: python migrate.py
-        env: &md
-          DB: md:geo_odds
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       - name: Refresh security universe
         run: python universe.py
-        env: *md
+        env: &md
+          DB: md:event_risk
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       - name: Enrich Polymarket metadata
         run: python enrich.py
         env: *md
@@ -46,5 +28,5 @@ jobs:
         run: python backfill.py
         env: *md
       - name: Refresh prices, relevance and coefficients
-        run: python pipeline.py models
+        run: python pipeline_runner.py models
         env: *md
