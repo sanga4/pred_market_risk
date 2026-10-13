@@ -1,8 +1,27 @@
-"""Retail-facing event-to-security relevance rules.
+"""Retail-facing event classification and event-to-security relevance rules."""
+import re
 
-Relevance answers whether an unresolved event should be shown for a ticker. It is
-separate from the empirical probability-sensitivity coefficient.
-"""
+THEME_PATTERNS = [
+    ("taiwan", r"\btaiwan\b|\btaipei\b|china.{0,20}(?:invade|blockade).{0,20}taiwan"),
+    ("china_trade", r"china.{0,30}(?:trade|tariff|export|chip|semiconductor)|(?:trade deal|tariff).{0,30}china"),
+    ("iran_hormuz", r"\biran\b|\bhormuz\b|persian gulf|kharg|farsi island|hengam|abu musa|tunb|houthi"),
+    ("israel_middle_east", r"\bisrael\b|\bgaza\b|\bhamas\b|\bhezbollah\b|\blebanon\b|\bsyria\b|\bsaudi\b|middle east"),
+    ("russia_ukraine", r"\brussia\b|\bukraine\b|\bnato\b|\bputin\b|zelensky|crimea|donbas|kremlin"),
+    ("korea", r"north korea|south korea|kim jong"),
+    ("rates", r"\bfed\b|federal reserve|rate cut|interest rate|\bfomc\b|treasury yield|fed funds"),
+    ("recession", r"recession|\bgdp\b|unemployment|economic contraction|soft landing|jobs report|nonfarm|\bcpi\b|\bpce\b"),
+    ("crypto", r"bitcoin|crypto|ethereum|binance|coinbase"),
+    ("trade", r"tariff|trade deal|trade agreement|customs|\bimport\b|\bexport\b"),
+    ("energy", r"\boil\b|\bgas\b|diesel|pipeline|\bopec\b|energy|refinery|shipping|strait"),
+    ("defense", r"military|\bwar\b|strike|invasion|nuclear|missile|clash|attack"),
+]
+
+
+def classify_theme(text):
+    s=(text or "").lower()
+    for theme,pattern in THEME_PATTERNS:
+        if re.search(pattern,s): return theme
+    return "other"
 
 
 def event_severity(title):
