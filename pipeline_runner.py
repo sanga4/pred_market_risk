@@ -1,32 +1,34 @@
 #!/usr/bin/env python3
-"""Production entrypoint around pipeline.py with safe DuckDB aliases."""
+"""Production entrypoint around pipeline.py with safe DuckDB aliases and retail relevance rules."""
 import argparse
 import pipeline
+from relevance import score_relevance
 
 
 def refresh_market_features(con):
     con.execute("DELETE FROM market_features")
     con.execute("""
       INSERT INTO market_features
-      WITH latest AS (
-        SELECT venue,market_id,max(ts) latest_ts FROM ticks WHERE prob IS NOT NULL GROUP BY 1,2
-      ), base AS (
-        SELECT t.*,l.latest_ts FROM ticks t JOIN latest l USING(venue,market_id) WHERE t.prob IS NOT NULL
-      ), agg AS (
-        SELECT venue,market_id,latest_ts,
+      WITH cur AS (
+        SELECT venue,market_id,max(ts) latest_ts,
           arg_max(event_id,ts) event_id,arg_max(event_title,ts) event_title,
           arg_max(market_title,ts) market_title,arg_max(close_time,ts) close_time,
-          arg_max(prob,ts) prob,
-          arg_max(prob,ts) FILTER(WHERE ts<=latest_ts-INTERVAL '1 hour') prob_1h,
-          arg_max(prob,ts) FILTER(WHERE ts<=latest_ts-INTERVAL '24 hours') prob_24h,
-          arg_max(yes_bid,ts) yes_bid,arg_max(yes_ask,ts) yes_ask,arg_max(last,ts) last_px,
-          arg_max(volume,ts) volume,arg_max(volume_24h,ts) volume_24h
-        FROM base GROUP BY 1,2,3
+          arg_max(prob,ts) prob,arg_max(yes_bid,ts) yes_bid,arg_max(yes_ask,ts) yes_ask,
+          arg_max(last,ts) last_px,arg_max(volume,ts) volume,arg_max(volume_24h,ts) volume_24h
+        FROM ticks WHERE prob IS NOT NULL GROUP BY 1,2
+      ), hist AS (
+        SELECT c.venue,c.market_id,
+          arg_max(h.prob,h.ts) FILTER(WHERE h.ts<=c.latest_ts-INTERVAL '1 hour') prob_1h,
+          arg_max(h.prob,h.ts) FILTER(WHERE h.ts<=c.latest_ts-INTERVAL '24 hours') prob_24h
+        FROM cur c LEFT JOIN probability_history_all h
+          ON h.venue=c.venue AND h.market_id=c.market_id
+        GROUP BY 1,2
       )
-      SELECT venue,market_id,event_id,event_title,market_title,close_time,latest_ts,prob,prob_1h,prob_24h,
-        prob-prob_1h,prob-prob_24h,yes_bid,yes_ask,
-        CASE WHEN yes_bid IS NOT NULL AND yes_ask IS NOT NULL THEN yes_ask-yes_bid END,
-        last_px,volume,volume_24h,now() FROM agg
+      SELECT c.venue,c.market_id,c.event_id,c.event_title,c.market_title,c.close_time,c.latest_ts,c.prob,
+        h.prob_1h,h.prob_24h,c.prob-h.prob_1h,c.prob-h.prob_24h,c.yes_bid,c.yes_ask,
+        CASE WHEN c.yes_bid IS NOT NULL AND c.yes_ask IS NOT NULL THEN c.yes_ask-c.yes_bid END,
+        c.last_px,c.volume,c.volume_24h,now()
+      FROM cur c LEFT JOIN hist h USING(venue,market_id)
     """)
 
 
@@ -87,6 +89,7 @@ def fit_coefficients(con):
 
 pipeline.refresh_market_features = refresh_market_features
 pipeline.fit_coefficients = fit_coefficients
+pipeline.score_relevance = score_relevance
 
 if __name__ == '__main__':
     p=argparse.ArgumentParser(); p.add_argument('job',choices=['markets','models','all']); args=p.parse_args()
