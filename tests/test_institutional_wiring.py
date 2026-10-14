@@ -9,7 +9,7 @@ def text(name: str) -> str:
 
 def test_all_runtime_migration_paths_use_shared_ledger():
     migration_runner = text("institutional_migrations.py")
-    assert '"institutional_schema_017.sql"' in migration_runner
+    assert '"institutional_schema_019.sql"' in migration_runner
     assert "er_schema_migrations" in migration_runner
 
     for name in ["institutional_service.py", "institutional_worker.py", "migrate_institutional.py"]:
@@ -19,12 +19,12 @@ def test_all_runtime_migration_paths_use_shared_ledger():
         )
 
 
-def test_runtime_collectors_use_verified_archive_batch_ingest_and_versioned_graph():
+def test_runtime_collectors_use_verified_archive_parallel_ingest_and_incremental_mapping():
     for name in ["institutional_service.py", "institutional_worker.py"]:
         body = text(name)
         assert "from institutional_archive_v2 import archive_pending" in body
-        assert "from institutional_ingest_v4 import run_once" in body
-        assert "from institutional_mapping_v3 import run_mapping_pass" in body
+        assert "from institutional_ingest_v5 import run_once" in body
+        assert "from institutional_mapping_v4 import run_mapping_pass" in body
         assert "from institutional_mapping_drift import persist_mapping_drift" in body
         assert "from institutional_lifecycle import sync_event_lifecycle" in body
         assert "from institutional_graph_v2 import run_graph_pass" in body
@@ -35,11 +35,17 @@ def test_runtime_collectors_use_verified_archive_batch_ingest_and_versioned_grap
         assert "RAW_ARCHIVE_BATCH_SIZE" in body
 
 
+def test_ops_review_uses_current_mapping_semantics():
+    body = text("institutional_ops_api.py")
+    assert "from institutional_mapping_v4 import DIRECTIONS, RELATIONSHIP_TYPES, review_candidate" in body
+
+
 def test_service_exposes_curves_readiness_and_lossless_changefeed():
     body = text("institutional_service.py")
     assert "institutional_curve_api" in body
     assert "institutional_changefeed_api" in body
     assert "institutional_readiness_api" in body
+    assert 'X-EventRisk-Schema-Version"] = "v2.4"' in body
     assert "app.include_router(curve_router)" in body
     assert "app.include_router(changefeed_router)" in body
     assert "app.include_router(readiness_router)" in body
@@ -57,7 +63,7 @@ def test_admin_release_path_uses_v3_point_in_time_generator():
     assert "later closure fields masked" in body
 
 
-def test_latest_schema_contains_point_in_time_semantic_presence_and_ops_provenance():
+def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_provenance():
     schema9 = text("institutional_schema_009.sql")
     for value in [
         "er_event_curve_as_known", "er_event_curve_current_taxonomy", "er_served_canonical_events",
@@ -87,6 +93,13 @@ def test_latest_schema_contains_point_in_time_semantic_presence_and_ops_provenan
 
     schema17 = text("institutional_schema_017.sql")
     assert "ingestion_run_recovery_v1" in schema17
+
+    schema18 = text("institutional_schema_018.sql")
+    for value in ["er_mapping_passes", "er_mapping_contract_state", "mapping_rules_v4_batched"]:
+        assert value in schema18
+
+    schema19 = text("institutional_schema_019.sql")
+    assert "parallel_fetch_serial_write_v5" in schema19
 
 
 def test_raw_bundle_schema_exists():
