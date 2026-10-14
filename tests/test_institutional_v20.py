@@ -210,7 +210,7 @@ def test_post_decision_contract_change_opens_mapping_drift_issue(monkeypatch, tm
     try:
         issue = con.execute(
             """SELECT severity,status FROM er_quality_issues
-               WHERE issue_type='same_event_mapping_semantic_drift' AND status='open'"""
+               WHERE rule_code='same_event_mapping_semantic_drift' AND status='open'"""
         ).fetchone()
         assert issue == ("critical", "open")
         current_events = con.execute(
@@ -231,7 +231,7 @@ def test_every_bulk_release_query_binds_on_current_schema(monkeypatch, tmp_path)
     try:
         for name, sql in DATASETS.items():
             try:
-                con.execute(sql, _params(sql, as_of)).fetch_arrow_table()
+                con.execute(sql, _params(sql, as_of)).to_arrow_table()
             except Exception as exc:
                 raise AssertionError(f"bulk dataset {name} failed to bind/execute: {exc}") from exc
     finally:
