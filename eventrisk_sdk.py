@@ -24,8 +24,13 @@ class EventRisk:
         if api_key:
             self.session.headers["Authorization"] = f"Bearer {api_key}"
 
+    @staticmethod
+    def _time(value: Optional[datetime | str]):
+        return value.isoformat() if isinstance(value, datetime) else value
+
     def _get(self, path: str, params: Optional[dict[str, Any]] = None):
-        response = self.session.get(f"{self.base_url}{path}", params=params, timeout=self.timeout)
+        clean = {k: v for k, v in (params or {}).items() if v is not None}
+        response = self.session.get(f"{self.base_url}{path}", params=clean, timeout=self.timeout)
         if not response.ok:
             raise EventRiskError(f"{response.status_code}: {response.text[:1000]}")
         return response.json()
@@ -57,25 +62,53 @@ class EventRisk:
         end: Optional[datetime | str] = None,
         limit: int = 10000,
     ):
+        """History restated through the event's current active mapping."""
         return self._get(f"/v1/events/{event_id}/history", {
             "source_id": source_id,
-            "start": start.isoformat() if isinstance(start, datetime) else start,
-            "end": end.isoformat() if isinstance(end, datetime) else end,
+            "start": self._time(start),
+            "end": self._time(end),
+            "limit": limit,
+        })
+
+    def event_history_point_in_time(
+        self,
+        event_id: str,
+        *,
+        source_id: Optional[str] = None,
+        start: Optional[datetime | str] = None,
+        end: Optional[datetime | str] = None,
+        limit: int = 10000,
+    ):
+        """History using the canonical mapping that was valid when EventRisk received each row."""
+        return self._get(f"/v1/events/{event_id}/history-point-in-time", {
+            "source_id": source_id,
+            "start": self._time(start),
+            "end": self._time(end),
             "limit": limit,
         })
 
     def event_as_of(self, event_id: str, at: datetime | str):
-        return self._get(
-            f"/v1/events/{event_id}/as-of",
-            {"at": at.isoformat() if isinstance(at, datetime) else at},
-        )
+        """Latest source observations by cutoff, using the endpoint's restated event identity."""
+        return self._get(f"/v1/events/{event_id}/as-of", {"at": self._time(at)})
+
+    def event_as_known(self, event_id: str, at: datetime | str):
+        """Canonical metadata and source observations exactly as EventRisk knew them at `at`."""
+        return self._get(f"/v1/events/{event_id}/as-known", {"at": self._time(at)})
+
+    def event_versions(self, event_id: str):
+        return self._get(f"/v1/events/{event_id}/versions")
+
+    def event_family_versions(self, family_id: str):
+        return self._get(f"/v1/event-families/{family_id}/versions")
 
     def source_comparison(self, event_id: str):
         return self._get(f"/v1/events/{event_id}/source-comparison")
 
     def term_structure(self, family_id: str, as_of: Optional[datetime | str] = None):
-        value = as_of.isoformat() if isinstance(as_of, datetime) else as_of
-        return self._get(f"/v1/event-families/{family_id}/term-structure", {"as_of": value})
+        return self._get(
+            f"/v1/event-families/{family_id}/term-structure",
+            {"as_of": self._time(as_of)},
+        )
 
     def event_relationships(self, event_id: str, *, include_inferred: bool = False):
         return self._get(
@@ -100,7 +133,7 @@ class EventRisk:
 
     def changes(self, since: datetime | str, *, source_id: Optional[str] = None, limit: int = 1000):
         return self._get("/v1/changes", {
-            "since": since.isoformat() if isinstance(since, datetime) else since,
+            "since": self._time(since),
             "source_id": source_id,
             "limit": limit,
         })
