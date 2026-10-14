@@ -16,6 +16,7 @@ def setup_database(tmp_path):
             "institutional_schema_003.sql",
             "institutional_schema_004.sql",
             "institutional_schema_005.sql",
+            "institutional_schema_006.sql",
         ]:
             con.execute((root / name).read_text())
     finally:
@@ -58,11 +59,8 @@ def snapshot(source, market_id, title, close, bid=0.2, ask=0.22, source_event_id
 
 def persist_snapshot(con, snap, run_id="test-run"):
     from institutional_ingest_v2 import (
-        ensure_sources,
-        insert_observation,
-        insert_raw,
-        link_contract_version_evidence,
-        upsert_contract,
+        ensure_sources, insert_observation, insert_raw,
+        link_contract_version_evidence, upsert_contract,
     )
     ensure_sources(con)
     con.execute(
@@ -111,10 +109,8 @@ def test_raw_lineage_versioning_mapping_graph_and_qa(tmp_path):
         assert versions[1][1] is None
 
         evidence = con.execute(
-            """SELECT version_no,evidence_role,count(*)
-               FROM er_contract_version_evidence
-               WHERE source_contract_id=?
-               GROUP BY version_no,evidence_role""",
+            """SELECT version_no,evidence_role,count(*) FROM er_contract_version_evidence
+               WHERE source_contract_id=? GROUP BY version_no,evidence_role""",
             [left_id],
         ).fetchall()
         assert set(evidence) == {
@@ -202,6 +198,42 @@ def test_similar_but_not_identical_contracts_are_not_silently_merged(tmp_path):
         assert len({m[1] for m in mappings}) == 2
         pending = con.execute("SELECT count(*) FROM er_mapping_candidates WHERE status='pending'").fetchone()[0]
         assert pending >= 1
+    finally:
+        con.close()
+
+
+def test_same_title_different_resolution_rules_require_review(tmp_path):
+    setup_database(tmp_path)
+    from datetime import datetime, timezone
+    from institutional_mapping_v2 import run_mapping_pass
+
+    close = datetime(2027, 12, 31, tzinfo=timezone.utc)
+    left = snapshot("kalshi", "KX-RULES", "Will China blockade Taiwan before 2028?", close)
+    right = snapshot("polymarket", "PM-RULES", "Will China blockade Taiwan before 2028?", close)
+    left.resolution_rules = "YES only if commercial shipping is physically prevented for at least 24 hours."
+    right.resolution_rules = "YES if China formally announces a blockade, even before shipping is interrupted."
+
+    con = db.connect()
+    try:
+        left_id = persist_snapshot(con, left, "rule-a")
+        right_id = persist_snapshot(con, right, "rule-b")
+    finally:
+        con.close()
+
+    result = run_mapping_pass()
+    assert result["auto_exact_mappings"] == 0
+    con = db.connect()
+    try:
+        mapped = con.execute(
+            "SELECT canonical_event_id FROM er_latest_contract_mappings WHERE source_contract_id IN (?,?)",
+            [left_id, right_id],
+        ).fetchall()
+        assert len({r[0] for r in mapped}) == 2
+        candidate = con.execute(
+            """SELECT suggested_relationship,resolution_compatible,rules_available_both
+               FROM er_mapping_candidates LIMIT 1"""
+        ).fetchone()
+        assert candidate == ("related_only", False, True)
     finally:
         con.close()
 
