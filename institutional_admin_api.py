@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from institutional_auth import create_client_key, disable_client
-from institutional_exports import generate_release, list_releases, release_manifest
+from institutional_exports_v2 import generate_release, list_releases, release_manifest
 from institutional_ops_api import admin_auth
 
 router = APIRouter(tags=["institutional-admin"])
@@ -21,6 +21,7 @@ class ClientCreate(BaseModel):
 class ReleaseCreate(BaseModel):
     as_of: Optional[datetime] = None
     notes: Optional[str] = Field(default=None, max_length=4000)
+    require_ready: bool = True
 
 
 @router.post("/internal/api-clients", dependencies=[Depends(admin_auth)])
@@ -42,7 +43,7 @@ def revoke_api_client(client_id: str):
 @router.post("/internal/releases", dependencies=[Depends(admin_auth)])
 def create_release(body: ReleaseCreate):
     try:
-        return generate_release(body.as_of, body.notes)
+        return generate_release(body.as_of, body.notes, require_ready=body.require_ready)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
 
@@ -54,7 +55,7 @@ def releases(limit: int = Query(50, ge=1, le=500)):
 
 @router.get("/v1/releases/{release_id}")
 def release(release_id: str):
-    manifests = release_manifest(release_id)
-    if not manifests:
+    manifest = release_manifest(release_id)
+    if not manifest:
         raise HTTPException(404, "Release not found")
-    return {"release_id": release_id, "datasets": manifests}
+    return manifest
