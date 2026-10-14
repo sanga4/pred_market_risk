@@ -1,9 +1,9 @@
 """Version-aware, provenance-preserving institutional knowledge graph.
 
-This graph layer makes no security-return or portfolio-impact claims. It reconstructs
-source-asserted event/entity mentions over the intersection of source-contract metadata
-versions and canonical-mapping versions. Thus a changed contract or remapping closes the
-semantic interval instead of leaving a stale current relationship active.
+No investment-impact claims are produced here. Source-asserted mentions are constructed
+only from the prospective full semantic contract ledger and intersected with canonical
+mapping validity. Older graph_rules_v1 edges are preserved as legacy history and retired
+from the current graph rather than being rewritten.
 """
 
 from __future__ import annotations
@@ -66,10 +66,9 @@ def refresh_versioned_mentions(con) -> dict:
              m.mapping_id,m.canonical_event_id,m.valid_from mapping_from,m.valid_to mapping_to,
              v.source_contract_id,v.version_no,v.title,v.description,v.resolution_rules,
              v.source_observed_at,v.valid_from version_from,v.valid_to version_to,
-             c.source_id
+             v.source_id,v.event_raw_snapshot_id,v.market_raw_snapshot_id
            FROM er_event_mappings m
-           JOIN er_source_contract_versions v USING(source_contract_id)
-           JOIN er_source_contracts c USING(source_contract_id)
+           JOIN er_contract_semantic_versions v USING(source_contract_id)
            WHERE (v.valid_to IS NULL OR v.valid_to>m.valid_from)
              AND (m.valid_to IS NULL OR m.valid_to>v.valid_from)
            ORDER BY m.canonical_event_id,v.source_contract_id,v.version_no"""
@@ -77,9 +76,9 @@ def refresh_versioned_mentions(con) -> dict:
 
     considered = inserted = evidence_written = 0
     for (
-        mapping_id, event_id, mapping_from, mapping_to,
-        contract_id, version_no, title, description, rules,
-        source_observed_at, version_from, version_to, source_id,
+        mapping_id,event_id,mapping_from,mapping_to,
+        contract_id,version_no,title,description,rules,
+        source_observed_at,version_from,version_to,source_id,event_raw_id,market_raw_id,
     ) in intervals:
         valid_from = _interval_start(mapping_from, version_from)
         valid_to = _interval_end(mapping_to, version_to)
@@ -108,7 +107,7 @@ def refresh_versioned_mentions(con) -> dict:
                 [
                     edge_id,event_id,"canonical_event","mentions",entity_id,entity_type,
                     "source_asserted",1.0,
-                    f"Source contract version explicitly mentions {canonical_name}",
+                    f"Full semantic source-contract version explicitly mentions {canonical_name}",
                     None,GRAPH_VERSION,False,"source_asserted",
                     source_observed_at,valid_from,valid_to,
                 ],
@@ -116,14 +115,10 @@ def refresh_versioned_mentions(con) -> dict:
             if not existed:
                 inserted += 1
 
-            evidence_rows = con.execute(
-                """SELECT evidence_role,raw_snapshot_id
-                   FROM er_contract_version_evidence
-                   WHERE source_contract_id=? AND version_no=?
-                   ORDER BY evidence_role""",
-                [contract_id, version_no],
-            ).fetchall()
-            for role, raw_snapshot_id in evidence_rows:
+            for role, raw_snapshot_id in (
+                ("event_payload", event_raw_id),
+                ("market_payload", market_raw_id),
+            ):
                 evidence_id = base.stable_id("evd", edge_id, role, raw_snapshot_id)
                 before = con.execute(
                     "SELECT 1 FROM er_edge_evidence WHERE edge_id=? AND evidence_id=?",
@@ -134,13 +129,14 @@ def refresh_versioned_mentions(con) -> dict:
                          edge_id,evidence_id,evidence_type,source_id,source_record_id,excerpt)
                        VALUES (?,?,?,?,?,?) ON CONFLICT(edge_id,evidence_id) DO NOTHING""",
                     [
-                        edge_id,evidence_id,f"contract_version_{role}",source_id,raw_snapshot_id,
+                        edge_id,evidence_id,f"semantic_contract_{role}",source_id,raw_snapshot_id,
                         (title or "")[:1000],
                     ],
                 )
                 if not before:
                     evidence_written += 1
     return {
+        "semantic_intervals": len(intervals),
         "candidate_alias_checks": considered,
         "mention_edges_inserted": inserted,
         "evidence_records_inserted": evidence_written,
