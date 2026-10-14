@@ -1,12 +1,22 @@
 from pathlib import Path
+
 from db import connect
 
 
+MIGRATIONS = [
+    "institutional_schema.sql",
+    "institutional_schema_002.sql",
+]
+
+
 def main():
-    sql = Path(__file__).with_name("institutional_schema.sql").read_text()
+    root = Path(__file__).parent
     con = connect()
     try:
-        con.execute(sql)
+        for name in MIGRATIONS:
+            sql = (root / name).read_text()
+            con.execute(sql)
+            print(f"applied {name}")
         print("institutional schema ready")
     finally:
         con.close()
