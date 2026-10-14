@@ -30,7 +30,7 @@ jobs:
             institutional_ontology.py institutional_lifecycle.py institutional_graph.py institutional_graph_v2.py institutional_reference_versions.py \
             institutional_qa.py institutional_qa_v2.py institutional_qa_v3.py \
             institutional_readiness.py institutional_readiness_v2.py institutional_readiness_v3.py institutional_readiness_api.py \
-            institutional_api.py institutional_curve_api.py institutional_ops_api.py \
+            institutional_api.py institutional_curve_api.py institutional_changefeed_api.py institutional_ops_api.py \
             institutional_history_api.py institutional_admin_api.py institutional_auth.py \
             institutional_stream.py institutional_exports.py institutional_exports_v2.py institutional_exports_v3.py \
             institutional_service.py institutional_worker.py institutional_backfill.py \
