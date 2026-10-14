@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from db import connect
 from institutional_admin_api import router as admin_router
 from institutional_api import router as data_router
-from institutional_archive import archive_pending
+from institutional_archive_v2 import archive_pending
 from institutional_auth import authenticate_key, extract_bearer
 from institutional_graph import run_graph_pass
 from institutional_history_api import router as history_router
@@ -40,6 +40,7 @@ SCHEMA_FILES = [
     "institutional_schema_005.sql",
     "institutional_schema_006.sql",
     "institutional_schema_007.sql",
+    "institutional_schema_008.sql",
 ]
 
 
@@ -55,7 +56,10 @@ def ensure_schema():
 
 def pipeline_cycle():
     ingest = run_once()
-    archive = archive_pending(limit=int(os.getenv("RAW_ARCHIVE_BATCH_SIZE", "5000")))
+    archive = archive_pending(
+        max_rows=int(os.getenv("RAW_ARCHIVE_MAX_ROWS", "20000")),
+        bundle_rows=int(os.getenv("RAW_ARCHIVE_BATCH_SIZE", "5000")),
+    )
     mapping = run_mapping_pass()
     ontology = run_ontology_pass()
     graph = run_graph_pass()
@@ -148,6 +152,9 @@ def health():
                 counts[table] = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
             counts["raw_database_bodies"] = con.execute(
                 "SELECT count(*) FROM er_raw_snapshots WHERE payload_json IS NOT NULL"
+            ).fetchone()[0]
+            counts["verified_archive_rows"] = con.execute(
+                "SELECT count(*) FROM er_raw_archive_objects WHERE status='archived'"
             ).fetchone()[0]
             sources = con.execute(
                 "SELECT source_id,health_status,last_success_at,last_observation_at FROM er_source_health ORDER BY source_id"
