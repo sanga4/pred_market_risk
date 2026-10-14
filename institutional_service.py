@@ -21,7 +21,7 @@ from institutional_api import router as data_router
 from institutional_archive import archive_pending
 from institutional_graph import run_graph_pass
 from institutional_ingest_v2 import run_once
-from institutional_mapping import run_mapping_pass
+from institutional_mapping_v2 import run_mapping_pass
 from institutional_ops_api import router as ops_router
 from institutional_qa import run_qa
 
@@ -106,7 +106,10 @@ async def optional_api_key(request: Request, call_next):
         supplied = auth.split(" ", 1)[1] if auth.lower().startswith("bearer ") else request.headers.get("x-api-key")
         if supplied != expected:
             return JSONResponse({"detail": "Invalid API key"}, status_code=401)
-    return await call_next(request)
+    response = await call_next(request)
+    response.headers["X-EventRisk-Schema-Version"] = "v1"
+    response.headers["X-EventRisk-Data-Layer"] = "observed+normalized"
+    return response
 
 
 @app.get("/health")
