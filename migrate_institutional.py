@@ -6,6 +6,7 @@ from db import connect
 MIGRATIONS = [
     "institutional_schema.sql",
     "institutional_schema_002.sql",
+    "institutional_schema_003.sql",
 ]
 
 
