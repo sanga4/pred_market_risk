@@ -5,19 +5,25 @@ from datetime import datetime, timezone
 import db
 
 
+MIGRATIONS = [
+    "institutional_schema.sql",
+    "institutional_schema_002.sql",
+    "institutional_schema_003.sql",
+    "institutional_schema_004.sql",
+    "institutional_schema_005.sql",
+    "institutional_schema_006.sql",
+    "institutional_schema_007.sql",
+    "institutional_schema_008.sql",
+]
+
+
 def setup_legacy_database(tmp_path):
     db.DB = str(tmp_path / "legacy_backfill_test.duckdb")
     os.environ["DB_FORCE_READ_WRITE"] = "true"
     root = Path(__file__).resolve().parents[1]
     con = db.connect()
     try:
-        for name in [
-            "institutional_schema.sql",
-            "institutional_schema_002.sql",
-            "institutional_schema_003.sql",
-            "institutional_schema_004.sql",
-            "institutional_schema_005.sql",
-        ]:
+        for name in MIGRATIONS:
             con.execute((root / name).read_text())
         con.execute("""CREATE TABLE ticks(
           ts TIMESTAMPTZ, venue VARCHAR, market_id VARCHAR, event_id VARCHAR,
@@ -90,3 +96,4 @@ def test_legacy_backfill_is_explicit_and_nonfabricated(tmp_path):
 
     qa = run_qa(stale_minutes=10**7)
     assert qa["checks"]["missing_raw_lineage"] == 0
+    assert qa["checks"]["archive_integrity"] == 0
