@@ -27,6 +27,7 @@ MIGRATION_FILES = [
     "institutional_schema_017.sql",
     "institutional_schema_018.sql",
     "institutional_schema_019.sql",
+    "institutional_schema_020.sql",
 ]
 
 
@@ -130,6 +131,10 @@ def _migration_appears_applied(con, name: str) -> bool:
         )
     if name == "institutional_schema_019.sql":
         return _method_exists(con, "source_ingestion", "parallel_fetch_serial_write_v5")
+    if name == "institutional_schema_020.sql":
+        return _method_exists(con, "source_ingestion", "change_data_capture_v6") and _method_exists(
+            con, "observation_sampling", "state_change_points_v1"
+        )
     return False
 
 
