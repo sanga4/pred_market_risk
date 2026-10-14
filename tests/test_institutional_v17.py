@@ -7,12 +7,12 @@ import db
 
 
 def setup_current_database(monkeypatch, tmp_path):
-    path = tmp_path / "institutional_v17.duckdb"
+    path = tmp_path / "institutional_current.duckdb"
     monkeypatch.setattr(db, "DB", str(path))
     os.environ["DB_FORCE_READ_WRITE"] = "true"
-    from institutional_migrations import ensure_schema
+    from institutional_migrations import MIGRATION_FILES, ensure_schema
     state = ensure_schema()
-    assert state["migration_count"] == 10
+    assert state["migration_count"] == len(MIGRATION_FILES)
     return path
 
 
@@ -108,17 +108,17 @@ def test_exact_merge_supersedes_orphan_and_preserves_point_in_time_curve(monkeyp
         superseded_event = superseded[0][0]
         assert superseded_event != target_event
 
-        served = con.execute("SELECT canonical_event_id,active_contract_count,source_count FROM er_served_canonical_events").fetchall()
+        served = con.execute(
+            "SELECT canonical_event_id,active_contract_count,source_count FROM er_served_canonical_events"
+        ).fetchall()
         assert served == [(target_event, 2, 2)]
 
-        # The current taxonomy restates both historical rows through the merged identity.
         current_target = con.execute(
             "SELECT count(*) FROM er_event_curve_current_taxonomy WHERE canonical_event_id=?",
             [target_event],
         ).fetchone()[0]
         assert current_target == 2
 
-        # As-known history keeps each row on the mapping that existed when EventRisk received it.
         as_known_target = con.execute(
             "SELECT count(*) FROM er_event_curve_as_known WHERE canonical_event_id=?",
             [target_event],
@@ -216,10 +216,10 @@ def test_reviewed_relationship_does_not_merge_and_has_evidence(monkeypatch, tmp_
 
 def test_v2_qa_and_readiness_cover_latest_schema(monkeypatch, tmp_path):
     setup_current_database(monkeypatch, tmp_path)
+    from institutional_migrations import MIGRATION_FILES
     from institutional_qa_v2 import run_qa
     from institutional_readiness_v2 import evaluate_readiness
 
-    # Empty fresh database is intentionally not distribution-ready, but schema controls must pass.
     qa = run_qa(stale_minutes=10**7)
     assert qa["checks"]["migration_ledger"] == 0
     assert qa["qa_version"] == "institutional_qa_v2"
@@ -227,5 +227,5 @@ def test_v2_qa_and_readiness_cover_latest_schema(monkeypatch, tmp_path):
     readiness = evaluate_readiness(stale_minutes=10**7, require_archive=False)
     migration = next(c for c in readiness["controls"] if c["name"] == "migration_ledger_current")
     assert migration["passed"] is True
-    assert migration["observed"] == 10
+    assert migration["observed"] == len(MIGRATION_FILES)
     assert readiness["policy"]["readiness_version"] == "institutional_readiness_v2"
