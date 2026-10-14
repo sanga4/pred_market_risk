@@ -1,8 +1,9 @@
 """Archive raw institutional source snapshots to S3-compatible object storage.
 
-The analytical database keeps raw JSON for convenient lineage queries, but this module
-writes an independent gzip-compressed copy to object storage.  The database records the
-archive key and content hash so every object can be verified later.
+Raw JSON first lands in the analytical database so normalization and lineage are atomic.
+This module then writes a gzip-compressed independent copy to object storage, verifies the
+SHA-256 metadata, and can compact the duplicate database JSON body. IDs, timestamps,
+hashes and archive pointers remain queryable after compaction.
 """
 
 from __future__ import annotations
@@ -27,6 +28,10 @@ def configured() -> bool:
     return all(os.getenv(k) for k in required)
 
 
+def compact_enabled() -> bool:
+    return os.getenv("COMPACT_ARCHIVED_RAW", "true").lower() in {"1", "true", "yes"}
+
+
 def s3_client():
     return boto3.client(
         "s3",
@@ -48,16 +53,17 @@ def archive_key(source_id, object_type, object_id, received_at, raw_snapshot_id)
 
 def archive_pending(limit: int = 5000) -> dict:
     if not configured():
-        return {"configured": False, "archived": 0, "failed": 0}
+        return {"configured": False, "archived": 0, "failed": 0, "compacted": 0}
     client = s3_client()
     bucket = os.environ["RAW_ARCHIVE_BUCKET"]
     con = connect()
-    archived = failed = 0
+    archived = failed = compacted = 0
     try:
         rows = con.execute(
             """SELECT raw_snapshot_id,source_id,source_object_type,source_object_id,
                       received_at,content_hash,payload_json
                FROM er_unarchived_raw_snapshots
+               WHERE payload_json IS NOT NULL
                ORDER BY received_at
                LIMIT ?""",
             [limit],
@@ -73,8 +79,10 @@ def archive_pending(limit: int = 5000) -> dict:
                          raw_snapshot_id,archive_provider,archive_bucket,archive_key,content_hash,
                          byte_size,compression,status,error_message)
                        VALUES (?,?,?,?,?,?,?,'failed',?)
-                       ON CONFLICT(raw_snapshot_id) DO UPDATE SET status='failed',error_message=excluded.error_message""",
-                    [snapshot_id, "s3_compatible", bucket, key, digest, len(body), "gzip", "Content hash mismatch before archive"],
+                       ON CONFLICT(raw_snapshot_id) DO UPDATE SET
+                         status='failed',error_message=excluded.error_message""",
+                    [snapshot_id, "s3_compatible", bucket, key, digest, len(body), "gzip",
+                     "Content hash mismatch before archive"],
                 )
                 continue
             try:
@@ -86,7 +94,8 @@ def archive_pending(limit: int = 5000) -> dict:
                     ContentEncoding="gzip",
                     Metadata={"sha256": digest, "raw_snapshot_id": snapshot_id},
                 )
-                # Verify object metadata immediately.  This is not a full restore test but catches failed writes.
+                # HEAD verification catches failed/misdirected writes without requiring a
+                # second transfer of the entire object.
                 head = client.head_object(Bucket=bucket, Key=key)
                 remote_digest = (head.get("Metadata") or {}).get("sha256")
                 if remote_digest != digest:
@@ -102,6 +111,19 @@ def archive_pending(limit: int = 5000) -> dict:
                     [snapshot_id, "s3_compatible", bucket, key, digest, len(body), "gzip"],
                 )
                 archived += 1
+                if compact_enabled():
+                    con.execute(
+                        """UPDATE er_raw_snapshots
+                           SET payload_json=NULL,payload_storage='object_archive',payload_compacted_at=now()
+                           WHERE raw_snapshot_id=?""",
+                        [snapshot_id],
+                    )
+                    compacted += 1
+                else:
+                    con.execute(
+                        "UPDATE er_raw_snapshots SET payload_storage='database+object_archive' WHERE raw_snapshot_id=?",
+                        [snapshot_id],
+                    )
             except Exception as exc:
                 failed += 1
                 con.execute(
@@ -109,10 +131,17 @@ def archive_pending(limit: int = 5000) -> dict:
                          raw_snapshot_id,archive_provider,archive_bucket,archive_key,content_hash,
                          byte_size,compression,status,error_message)
                        VALUES (?,?,?,?,?,?,?,'failed',?)
-                       ON CONFLICT(raw_snapshot_id) DO UPDATE SET status='failed',error_message=excluded.error_message""",
+                       ON CONFLICT(raw_snapshot_id) DO UPDATE SET
+                         status='failed',error_message=excluded.error_message""",
                     [snapshot_id, "s3_compatible", bucket, key, digest, len(body), "gzip", str(exc)[:2000]],
                 )
-        return {"configured": True, "archived": archived, "failed": failed, "bucket": bucket}
+        return {
+            "configured": True,
+            "archived": archived,
+            "failed": failed,
+            "compacted": compacted,
+            "bucket": bucket,
+        }
     finally:
         con.close()
 
