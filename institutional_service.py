@@ -36,6 +36,7 @@ SCHEMA_FILES = [
     "institutional_schema_002.sql",
     "institutional_schema_003.sql",
     "institutional_schema_004.sql",
+    "institutional_schema_005.sql",
 ]
 
 
