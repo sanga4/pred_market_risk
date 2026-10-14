@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from institutional_readiness_v2 import evaluate_readiness
+from institutional_readiness_v3 import evaluate_readiness
 
 router = APIRouter(tags=["institutional-readiness"])
 
