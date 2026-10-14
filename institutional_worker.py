@@ -27,6 +27,7 @@ SCHEMA_FILES = [
     "institutional_schema_004.sql",
     "institutional_schema_005.sql",
     "institutional_schema_006.sql",
+    "institutional_schema_007.sql",
 ]
 
 log = logging.getLogger("eventrisk.worker")
