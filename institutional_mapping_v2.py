@@ -1,8 +1,8 @@
 """Scaled canonical-event candidate generation for EventRisk.
 
-Keeps institutional_mapping.py's conservative semantics but avoids all-pairs comparison.
 Contracts are compared only when they share meaningful normalized tokens across sources.
-This changes performance, not the trust policy: only strict exact matches can auto-merge.
+Automatic merges are deliberately rare: title, deadline *and* normalized resolution rules
+must all be compatible. Missing/different rules force human review.
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections import defaultdict
 
 import institutional_mapping as base
-from db import connect
 
 METHOD_VERSION = "mapping_rules_v2_blocked"
 GENERIC = {
@@ -24,16 +23,18 @@ def meaningful_tokens(title: str) -> set[str]:
     return {t for t in tokens if len(t) >= 3 and t not in GENERIC}
 
 
+def normalized_rules(value: str | None) -> str:
+    return base.normalize(value or "")
+
+
 def generate_candidates(con) -> int:
     contracts = con.execute(
-        """SELECT source_contract_id,source_id,current_title,closes_at,resolves_at
+        """SELECT source_contract_id,source_id,current_title,closes_at,resolves_at,current_resolution_rules
            FROM er_source_contracts WHERE active=TRUE ORDER BY source_id,source_contract_id"""
     ).fetchall()
     if not contracts:
         return 0
 
-    # Build an inverted token index.  This lets a new contract find plausible counterparts
-    # without evaluating every other active market in the universe.
     token_index: dict[str, set[int]] = defaultdict(set)
     token_sets: list[set[str]] = []
     for idx, row in enumerate(contracts):
@@ -60,37 +61,54 @@ def generate_candidates(con) -> int:
             seen_pairs.add(pair)
 
             shared = token_sets[i] & token_sets[j]
-            # Very short titles need at least one strong shared term; ordinary titles need 2.
             required_shared = 1 if min(len(token_sets[i]), len(token_sets[j])) <= 2 else 2
             if len(shared) < required_shared:
                 continue
 
-            sim = base.title_similarity(left[2], right[2])
-            if sim < 0.72:
+            title_sim = base.title_similarity(left[2], right[2])
+            if title_sim < 0.72:
                 continue
             hours = base.deadline_hours(left[4] or left[3], right[4] or right[3])
             if hours is not None and hours > 24 * 120:
                 continue
+
+            left_rules = normalized_rules(left[5])
+            right_rules = normalized_rules(right[5])
+            rules_both = bool(left_rules and right_rules)
+            rules_sim = base.title_similarity(left_rules, right_rules) if rules_both else None
+            # Automatic equivalence requires exact normalized source rules. Similar-but-not-
+            # identical rules remain reviewable candidates rather than silent merges.
+            rules_compatible = rules_both and left_rules == right_rules
+
             exact_title = base.normalize(left[2]) == base.normalize(right[2])
             exact_deadline = hours is None or hours <= 24
-            suggestion = "same_event" if exact_title and exact_deadline else "related_only"
-            confidence = min(1.0, sim + (0.03 if exact_deadline else 0.0))
+            suggestion = "same_event" if exact_title and exact_deadline and rules_compatible else "related_only"
+
+            if rules_sim is None:
+                confidence = title_sim * (1.0 if exact_deadline else 0.9)
+            else:
+                confidence = 0.60 * title_sim + 0.30 * rules_sim + (0.10 if exact_deadline else 0.0)
+            confidence = min(1.0, max(0.0, confidence))
+
             candidate_id = base.stable_id(
                 "cand", min(left[0], right[0]), max(left[0], right[0]), METHOD_VERSION
             )
             con.execute(
                 """INSERT INTO er_mapping_candidates(
                      candidate_id,left_source_contract_id,right_source_contract_id,suggested_relationship,
-                     title_similarity,deadline_distance_hours,overall_confidence,candidate_method,method_version)
-                   VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(candidate_id) DO NOTHING""",
-                [candidate_id, left[0], right[0], suggestion, sim, hours, confidence,
-                 "token_block+title+deadline_rules", METHOD_VERSION],
+                     title_similarity,deadline_distance_hours,overall_confidence,candidate_method,method_version,
+                     resolution_similarity,resolution_compatible,rules_available_both)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(candidate_id) DO NOTHING""",
+                [candidate_id, left[0], right[0], suggestion, title_sim, hours, confidence,
+                 "token_block+title+deadline+resolution_rules", METHOD_VERSION,
+                 rules_sim, rules_compatible, rules_both],
             )
             inserted += 1
     return inserted
 
 
-# Patch the base orchestration so its bootstrap and strict auto-accept logic are retained.
+# Patch the base orchestration. base.auto_accept_exact can only see `same_event` candidates;
+# this module assigns that label only after the stricter resolution-rule gate above.
 base.generate_candidates = generate_candidates
 base.METHOD_VERSION = METHOD_VERSION
 
