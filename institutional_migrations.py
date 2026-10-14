@@ -27,82 +27,43 @@ MIGRATION_FILES = [
     "institutional_schema_007.sql",
     "institutional_schema_008.sql",
     "institutional_schema_009.sql",
+    "institutional_schema_010.sql",
 ]
 
 
 def _table_exists(con, name: str) -> bool:
-    return bool(
-        con.execute(
-            "SELECT count(*) FROM information_schema.tables WHERE table_name=?",
-            [name],
-        ).fetchone()[0]
-    )
+    return bool(con.execute(
+        "SELECT count(*) FROM information_schema.tables WHERE table_name=?", [name]
+    ).fetchone()[0])
 
 
 def _view_exists(con, name: str) -> bool:
-    return bool(
-        con.execute(
-            "SELECT count(*) FROM information_schema.views WHERE table_name=?",
-            [name],
-        ).fetchone()[0]
-    )
+    return bool(con.execute(
+        "SELECT count(*) FROM information_schema.views WHERE table_name=?", [name]
+    ).fetchone()[0])
 
 
 def _column_exists(con, relation: str, column: str) -> bool:
-    return bool(
-        con.execute(
-            """
-            SELECT count(*)
-            FROM information_schema.columns
-            WHERE table_name=? AND column_name=?
-            """,
-            [relation, column],
-        ).fetchone()[0]
-    )
+    return bool(con.execute(
+        "SELECT count(*) FROM information_schema.columns WHERE table_name=? AND column_name=?",
+        [relation, column],
+    ).fetchone()[0])
 
 
 def _migration_appears_applied(con, name: str) -> bool:
-    """Infer legacy migration state without mutating institutional data.
-
-    These sentinels are only used when upgrading a database that predates the
-    er_schema_migrations ledger. They deliberately use durable tables/columns/views
-    created by each migration. Migration 007 is special: replaying its ALTER COLUMN
-    after er_raw_lineage_status exists is unsafe in DuckDB, so the presence of its
-    payload-storage columns is sufficient evidence that its DDL already ran.
-    """
-
+    """Infer legacy migration state without mutating institutional data."""
     if name == "institutional_schema.sql":
-        return all(
-            _table_exists(con, table)
-            for table in (
-                "er_raw_snapshots",
-                "er_source_contracts",
-                "er_market_observations",
-                "er_canonical_events",
-            )
-        )
+        return all(_table_exists(con, table) for table in (
+            "er_raw_snapshots", "er_source_contracts", "er_market_observations", "er_canonical_events",
+        ))
     if name == "institutional_schema_002.sql":
-        return (
-            _table_exists(con, "er_mapping_candidates")
-            and _table_exists(con, "er_source_health")
-            and _view_exists(con, "er_event_curve")
-        )
+        return _table_exists(con, "er_mapping_candidates") and _table_exists(con, "er_source_health") and _view_exists(con, "er_event_curve")
     if name == "institutional_schema_003.sql":
-        return _table_exists(con, "er_raw_archive_objects") and _view_exists(
-            con, "er_unarchived_raw_snapshots"
-        )
+        return _table_exists(con, "er_raw_archive_objects") and _view_exists(con, "er_unarchived_raw_snapshots")
     if name == "institutional_schema_004.sql":
-        return (
-            _table_exists(con, "er_contract_version_evidence")
-            and _table_exists(con, "er_data_releases")
-            and _view_exists(con, "er_contract_lineage")
-        )
+        return _table_exists(con, "er_contract_version_evidence") and _table_exists(con, "er_data_releases") and _view_exists(con, "er_contract_lineage")
     if name == "institutional_schema_005.sql":
-        return (
-            _table_exists(con, "er_canonical_event_versions")
-            and _table_exists(con, "er_methodology_registry")
-            and _view_exists(con, "er_latest_canonical_event_versions")
-        )
+        return _table_exists(con, "er_canonical_event_versions") and _table_exists(con, "er_methodology_registry") and _view_exists(con, "er_latest_canonical_event_versions")
     if name == "institutional_schema_006.sql":
         return (
             _column_exists(con, "er_mapping_candidates", "resolution_similarity")
@@ -111,9 +72,7 @@ def _migration_appears_applied(con, name: str) -> bool:
             and _view_exists(con, "er_pending_mapping_review")
         )
     if name == "institutional_schema_007.sql":
-        return _column_exists(con, "er_raw_snapshots", "payload_storage") and _column_exists(
-            con, "er_raw_snapshots", "payload_compacted_at"
-        )
+        return _column_exists(con, "er_raw_snapshots", "payload_storage") and _column_exists(con, "er_raw_snapshots", "payload_compacted_at")
     if name == "institutional_schema_008.sql":
         return (
             _column_exists(con, "er_raw_archive_objects", "archive_member")
@@ -129,6 +88,11 @@ def _migration_appears_applied(con, name: str) -> bool:
             and _view_exists(con, "er_event_curve_as_known")
             and _view_exists(con, "er_served_canonical_events")
         )
+    if name == "institutional_schema_010.sql":
+        return bool(con.execute(
+            """SELECT count(*) FROM er_methodology_registry
+               WHERE methodology_id='event_mapping' AND methodology_version='mapping_rules_v3_reviewable'"""
+        ).fetchone()[0])
     return False
 
 
@@ -137,70 +101,53 @@ def _sha256(text: str) -> str:
 
 
 def ensure_schema() -> dict:
-    """Bring the institutional database to the current schema exactly once.
-
-    Returns a compact operational summary useful for startup logs and tests.
-    """
-
+    """Bring the institutional database to the current schema exactly once."""
     root = Path(__file__).parent
     con = connect()
     applied_now: list[str] = []
     bootstrapped: list[str] = []
     try:
-        con.execute(
-            """
+        con.execute("""
             CREATE TABLE IF NOT EXISTS er_schema_migrations (
               migration_name VARCHAR PRIMARY KEY,
               content_sha256 VARCHAR NOT NULL,
               applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
               bootstrapped BOOLEAN NOT NULL DEFAULT FALSE
             )
-            """
-        )
+        """)
 
         existing_count = con.execute("SELECT count(*) FROM er_schema_migrations").fetchone()[0]
         if existing_count == 0:
             for name in MIGRATION_FILES:
                 sql = (root / name).read_text()
                 if _migration_appears_applied(con, name):
-                    con.execute(
-                        """
-                        INSERT INTO er_schema_migrations(
-                          migration_name, content_sha256, bootstrapped
-                        ) VALUES (?, ?, TRUE)
-                        ON CONFLICT(migration_name) DO NOTHING
-                        """,
-                        [name, _sha256(sql)],
-                    )
+                    con.execute("""
+                        INSERT INTO er_schema_migrations(migration_name,content_sha256,bootstrapped)
+                        VALUES (?, ?, TRUE) ON CONFLICT(migration_name) DO NOTHING
+                    """, [name, _sha256(sql)])
                     bootstrapped.append(name)
 
         for name in MIGRATION_FILES:
             sql = (root / name).read_text()
             checksum = _sha256(sql)
             row = con.execute(
-                "SELECT content_sha256 FROM er_schema_migrations WHERE migration_name=?",
-                [name],
+                "SELECT content_sha256 FROM er_schema_migrations WHERE migration_name=?", [name]
             ).fetchone()
             if row is not None:
                 if row[0] != checksum:
                     raise RuntimeError(
-                        f"Institutional migration checksum drift for {name}: "
-                        "applied SQL differs from repository SQL. Add a new migration "
-                        "instead of editing an applied migration."
+                        f"Institutional migration checksum drift for {name}: applied SQL differs from repository SQL. "
+                        "Add a new migration instead of editing an applied migration."
                     )
                 continue
 
             con.execute("BEGIN TRANSACTION")
             try:
                 con.execute(sql)
-                con.execute(
-                    """
-                    INSERT INTO er_schema_migrations(
-                      migration_name, content_sha256, bootstrapped
-                    ) VALUES (?, ?, FALSE)
-                    """,
-                    [name, checksum],
-                )
+                con.execute("""
+                    INSERT INTO er_schema_migrations(migration_name,content_sha256,bootstrapped)
+                    VALUES (?, ?, FALSE)
+                """, [name, checksum])
                 con.execute("COMMIT")
             except Exception:
                 con.execute("ROLLBACK")
@@ -208,10 +155,6 @@ def ensure_schema() -> dict:
             applied_now.append(name)
 
         total = con.execute("SELECT count(*) FROM er_schema_migrations").fetchone()[0]
-        return {
-            "migration_count": int(total),
-            "applied_now": applied_now,
-            "bootstrapped": bootstrapped,
-        }
+        return {"migration_count": int(total), "applied_now": applied_now, "bootstrapped": bootstrapped}
     finally:
         con.close()
