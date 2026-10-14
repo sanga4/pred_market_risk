@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 from db import connect
-from institutional_archive import archive_pending
+from institutional_archive_v2 import archive_pending
 from institutional_graph import run_graph_pass
 from institutional_ingest_v2 import run_once
 from institutional_mapping_v2 import run_mapping_pass
@@ -28,6 +28,7 @@ SCHEMA_FILES = [
     "institutional_schema_005.sql",
     "institutional_schema_006.sql",
     "institutional_schema_007.sql",
+    "institutional_schema_008.sql",
 ]
 
 log = logging.getLogger("eventrisk.worker")
@@ -45,7 +46,10 @@ def ensure_schema():
 
 def cycle() -> dict:
     ingest = run_once()
-    archive = archive_pending(limit=int(os.getenv("RAW_ARCHIVE_BATCH_SIZE", "5000")))
+    archive = archive_pending(
+        max_rows=int(os.getenv("RAW_ARCHIVE_MAX_ROWS", "20000")),
+        bundle_rows=int(os.getenv("RAW_ARCHIVE_BATCH_SIZE", "5000")),
+    )
     mapping = run_mapping_pass()
     ontology = run_ontology_pass()
     graph = run_graph_pass()
