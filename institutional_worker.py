@@ -14,7 +14,7 @@ from institutional_mapping_drift import persist_mapping_drift
 from institutional_mapping_v3 import run_mapping_pass
 from institutional_migrations import ensure_schema
 from institutional_ontology import run_ontology_pass
-from institutional_qa_v2 import run_qa
+from institutional_qa_v3 import run_qa
 from institutional_reference_versions import sync_reference_versions
 
 log = logging.getLogger("eventrisk.worker")
