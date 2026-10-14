@@ -8,7 +8,11 @@ identity criteria used for automatic equivalence.
 
 from __future__ import annotations
 
+import json
+
 import institutional_mapping as base
+import institutional_qa as qa_base
+from db import connect
 from institutional_mapping_v2 import normalized_rules
 
 
@@ -88,3 +92,36 @@ def find_mapping_drift(con) -> list[dict]:
                         **detail,
                     })
     return problems
+
+
+def persist_mapping_drift() -> dict:
+    con = connect()
+    try:
+        problems = find_mapping_drift(con)
+        grouped: dict[str, list[dict]] = {}
+        for problem in problems:
+            grouped.setdefault(problem["canonical_event_id"], []).append(problem)
+        all_events = [r[0] for r in con.execute("SELECT canonical_event_id FROM er_canonical_events").fetchall()]
+        for event_id, event_problems in grouped.items():
+            qa_base.open_issue(
+                con,
+                "canonical_event",
+                event_id,
+                "same_event_mapping_semantic_drift",
+                "critical",
+                json.dumps(event_problems, default=str, sort_keys=True)[:12000],
+            )
+        for event_id in all_events:
+            if event_id not in grouped:
+                qa_base.resolve_issue(
+                    con,
+                    "canonical_event",
+                    event_id,
+                    "same_event_mapping_semantic_drift",
+                )
+        return {
+            "drifted_canonical_events": len(grouped),
+            "incompatible_pairs": len(problems),
+        }
+    finally:
+        con.close()
