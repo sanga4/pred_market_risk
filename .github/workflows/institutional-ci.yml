@@ -26,8 +26,8 @@ jobs:
           python -m py_compile \
             institutional_ingest.py institutional_ingest_v2.py institutional_archive.py \
             institutional_mapping.py institutional_mapping_v2.py institutional_ontology.py institutional_graph.py institutional_qa.py \
-            institutional_api.py institutional_ops_api.py institutional_admin_api.py institutional_auth.py \
-            institutional_stream.py institutional_exports.py institutional_service.py institutional_backfill.py \
+            institutional_api.py institutional_ops_api.py institutional_history_api.py institutional_admin_api.py institutional_auth.py \
+            institutional_stream.py institutional_exports.py institutional_service.py institutional_worker.py institutional_backfill.py \
             eventrisk_sdk.py
       - name: Run institutional tests
         run: python -m pytest -q tests/test_institutional_pipeline.py tests/test_institutional_backfill.py
