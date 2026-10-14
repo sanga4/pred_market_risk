@@ -44,7 +44,7 @@ def seed_contract(con, contract_id, source_id, market_id, title, rules, close, r
           source_contract_id,version_no,source_id,source_market_id,title,description,outcome_type,status,
           opens_at,closes_at,resolves_at,resolution_rules,received_at,valid_from,
           event_raw_snapshot_id,market_raw_snapshot_id,metadata_completeness)
-        VALUES (?,?,?,?,?,?,'binary','active',?,?,?,?,?,?,?,?,?,'full_v2')
+        VALUES (?,?,?,?,?,?,'binary','active',?,?,?,?,?,?,?,?,'full_v2')
     """, [
         contract_id, 1, source_id, market_id, title, f"Description {title}",
         received - timedelta(days=30), close, close, rules, received, received,
