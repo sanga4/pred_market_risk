@@ -21,7 +21,7 @@ class EventRisk:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "eventrisk-python/1.7"})
+        self.session.headers.update({"User-Agent": "eventrisk-python/2.1"})
         if api_key:
             self.session.headers["Authorization"] = f"Bearer {api_key}"
 
@@ -58,69 +58,28 @@ class EventRisk:
     def event(self, event_id: str):
         return self._get(f"/v1/events/{event_id}")
 
-    def event_curve(
-        self,
-        event_id: str,
-        *,
-        mapping_basis: str = "as_known",
-        source_id: Optional[str] = None,
-        start: Optional[datetime | str] = None,
-        end: Optional[datetime | str] = None,
-        as_of: Optional[datetime | str] = None,
-        limit: int = 25000,
-    ):
+    def event_curve(self, event_id: str, *, mapping_basis="as_known", source_id=None,
+                    start=None, end=None, as_of=None, limit=25000):
         return self._get(f"/v1/events/{event_id}/curve", {
-            "mapping_basis": mapping_basis,
-            "source_id": source_id,
-            "start": self._time(start),
-            "end": self._time(end),
-            "as_of": self._time(as_of),
-            "limit": limit,
+            "mapping_basis": mapping_basis, "source_id": source_id,
+            "start": self._time(start), "end": self._time(end),
+            "as_of": self._time(as_of), "limit": limit,
         })
 
-    def event_curve_latest(
-        self,
-        event_id: str,
-        *,
-        mapping_basis: str = "as_known",
-        at: Optional[datetime | str] = None,
-    ):
+    def event_curve_latest(self, event_id: str, *, mapping_basis="as_known", at=None):
         return self._get(f"/v1/events/{event_id}/curve/latest", {
-            "mapping_basis": mapping_basis,
-            "at": self._time(at),
+            "mapping_basis": mapping_basis, "at": self._time(at),
         })
 
-    def event_history(
-        self,
-        event_id: str,
-        *,
-        source_id: Optional[str] = None,
-        start: Optional[datetime | str] = None,
-        end: Optional[datetime | str] = None,
-        limit: int = 10000,
-    ):
+    def event_history(self, event_id: str, *, source_id=None, start=None, end=None, limit=10000):
         """History restated through the event's current active mapping."""
         return self._get(f"/v1/events/{event_id}/history", {
-            "source_id": source_id,
-            "start": self._time(start),
-            "end": self._time(end),
-            "limit": limit,
+            "source_id": source_id, "start": self._time(start), "end": self._time(end), "limit": limit,
         })
 
-    def event_history_point_in_time(
-        self,
-        event_id: str,
-        *,
-        source_id: Optional[str] = None,
-        start: Optional[datetime | str] = None,
-        end: Optional[datetime | str] = None,
-        limit: int = 10000,
-    ):
+    def event_history_point_in_time(self, event_id: str, *, source_id=None, start=None, end=None, limit=10000):
         return self._get(f"/v1/events/{event_id}/history-point-in-time", {
-            "source_id": source_id,
-            "start": self._time(start),
-            "end": self._time(end),
-            "limit": limit,
+            "source_id": source_id, "start": self._time(start), "end": self._time(end), "limit": limit,
         })
 
     def event_as_of(self, event_id: str, at: datetime | str):
@@ -138,10 +97,10 @@ class EventRisk:
     def source_comparison(self, event_id: str):
         return self._get(f"/v1/events/{event_id}/source-comparison")
 
-    def term_structure(self, family_id: str, as_of: Optional[datetime | str] = None):
+    def term_structure(self, family_id: str, as_of=None):
         return self._get(f"/v1/event-families/{family_id}/term-structure", {"as_of": self._time(as_of)})
 
-    def event_relationships(self, event_id: str, *, include_inferred: bool = False, include_expired: bool = False):
+    def event_relationships(self, event_id: str, *, include_inferred=False, include_expired=False):
         return self._get(f"/v1/events/{event_id}/relationships", {
             "include_inferred": str(include_inferred).lower(),
             "include_expired": str(include_expired).lower(),
@@ -150,28 +109,37 @@ class EventRisk:
     def entity(self, entity_id: str):
         return self._get(f"/v1/entities/{entity_id}")
 
-    def entity_relationships(self, entity_id: str, *, include_inferred: bool = False):
+    def entity_relationships(self, entity_id: str, *, include_inferred=False):
         return self._get(f"/v1/entities/{entity_id}/relationships", {
             "include_inferred": str(include_inferred).lower(),
         })
 
-    def graph(self, node_id: str, *, include_inferred: bool = False, limit: int = 500):
+    def graph(self, node_id: str, *, include_inferred=False, limit=500):
         return self._get(f"/v1/graph/{node_id}", {
-            "include_inferred": str(include_inferred).lower(),
-            "limit": limit,
+            "include_inferred": str(include_inferred).lower(), "limit": limit,
         })
 
-    def changes(self, since: datetime | str, *, source_id: Optional[str] = None, limit: int = 1000):
+    def changes(self, since: datetime | str, *, source_id=None, limit=1000):
+        """Legacy timestamp convenience endpoint. Prefer change_feed for lossless pagination."""
         return self._get("/v1/changes", {
+            "since": self._time(since), "source_id": source_id, "limit": limit,
+        })
+
+    def change_feed(self, *, cursor=None, since=None, source_id=None,
+                    mapping_basis="as_known", limit=1000):
+        """Lossless resumable observation feed. Reuse the returned `cursor` on the next call."""
+        return self._get("/v1/change-feed", {
+            "cursor": cursor,
             "since": self._time(since),
             "source_id": source_id,
+            "mapping_basis": mapping_basis,
             "limit": limit,
         })
 
-    def quality(self, *, severity: Optional[str] = None, limit: int = 250):
+    def quality(self, *, severity=None, limit=250):
         return self._get("/v1/quality", {"severity": severity, "limit": limit})
 
-    def releases(self, *, limit: int = 50):
+    def releases(self, *, limit=50):
         return self._get("/v1/releases", {"limit": limit})
 
     def release_manifest(self, release_id: str):
