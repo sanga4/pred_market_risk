@@ -1,14 +1,17 @@
-"""WebSocket stream for normalized EventRisk market observations.
+"""Lossless WebSocket stream for normalized EventRisk observations.
 
-The stream is an append-only delivery surface over er_market_observations.  It sends raw
-observed/normalized event data only; it does not emit portfolio actions or trade signals.
+The stream uses an opaque compound cursor over the same deterministic ordering as the
+underlying primary key. Timestamp-only cursors are unsafe when a batch contains many rows
+with the same received_at value; the compound cursor makes reconnects/page drains lossless.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -20,6 +23,13 @@ from institutional_auth import authenticate_key, extract_bearer
 router = APIRouter(tags=["institutional-stream"])
 
 
+@dataclass(frozen=True)
+class Cursor:
+    received_at: datetime
+    source_contract_id: str = ""
+    observed_at: datetime = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
 def _iso(value):
     if value is None:
         return None
@@ -28,20 +38,56 @@ def _iso(value):
     return str(value)
 
 
-def _parse_since(value: Optional[str]) -> datetime:
+def _parse_time(value: Optional[str], default: datetime) -> datetime:
     if not value:
-        return datetime.now(timezone.utc)
+        return default
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except ValueError:
-        return datetime.now(timezone.utc)
+        return default
 
 
-def _rows_since(cursor: datetime, source_id: Optional[str], limit: int = 1000):
+def encode_cursor(cursor: Cursor) -> str:
+    raw = json.dumps({
+        "r": cursor.received_at.isoformat(),
+        "c": cursor.source_contract_id,
+        "o": cursor.observed_at.isoformat(),
+    }, separators=(",", ":"), sort_keys=True).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def decode_cursor(value: Optional[str], since: Optional[str] = None) -> Cursor:
+    if value:
+        try:
+            padded = value + "=" * (-len(value) % 4)
+            data = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+            received = _parse_time(data.get("r"), datetime.now(timezone.utc))
+            observed = _parse_time(data.get("o"), datetime(1970, 1, 1, tzinfo=timezone.utc))
+            return Cursor(received, str(data.get("c") or ""), observed)
+        except Exception:
+            # Invalid resume tokens fail safely to the caller's explicit `since`, or now.
+            pass
+    received = _parse_time(since, datetime.now(timezone.utc))
+    return Cursor(received)
+
+
+def cursor_from_row(row: dict) -> Cursor:
+    return Cursor(row["received_at"], row["source_contract_id"], row["observed_at"])
+
+
+def _rows_after(cursor: Cursor, source_id: Optional[str], limit: int = 1000):
     con = connect(read_only=True)
     try:
-        where = ["o.received_at > ?"]
-        params = [cursor]
+        where = ["""(
+            o.received_at > ?
+            OR (o.received_at = ? AND o.source_contract_id > ?)
+            OR (o.received_at = ? AND o.source_contract_id = ? AND o.observed_at > ?)
+        )"""]
+        params = [
+            cursor.received_at, cursor.received_at, cursor.source_contract_id,
+            cursor.received_at, cursor.source_contract_id, cursor.observed_at,
+        ]
         if source_id:
             where.append("o.source_id = ?")
             params.append(source_id)
@@ -56,7 +102,7 @@ def _rows_since(cursor: datetime, source_id: Optional[str], limit: int = 1000):
                 JOIN er_source_contracts c USING(source_contract_id)
                 LEFT JOIN er_latest_contract_mappings m USING(source_contract_id)
                 WHERE {' AND '.join(where)}
-                ORDER BY o.received_at,o.source_contract_id
+                ORDER BY o.received_at,o.source_contract_id,o.observed_at
                 LIMIT ?""",
             params,
         )
@@ -79,38 +125,40 @@ async def stream(websocket: WebSocket):
         return
 
     source_id = websocket.query_params.get("source_id")
-    cursor = _parse_since(websocket.query_params.get("since"))
+    cursor = decode_cursor(websocket.query_params.get("cursor"), websocket.query_params.get("since"))
     poll_seconds = max(0.5, min(10.0, float(websocket.query_params.get("poll_seconds", "1"))))
     await websocket.accept()
     await websocket.send_json({
         "type": "hello",
-        "schema_version": "v1",
+        "schema_version": "v2.1",
         "data_layer": "observed+normalized",
         "client_id": client.get("client_id") if client else None,
-        "cursor": cursor.isoformat(),
+        "cursor": encode_cursor(cursor),
+        "cursor_semantics": "exclusive resume token",
     })
 
     try:
         while True:
-            rows = await asyncio.to_thread(_rows_since, cursor, source_id, 1000)
+            rows = await asyncio.to_thread(_rows_after, cursor, source_id, 1000)
             if rows:
+                next_cursor = cursor_from_row(rows[-1])
+                serializable = []
                 for row in rows:
-                    for key, value in list(row.items()):
-                        if isinstance(value, datetime):
-                            row[key] = _iso(value)
-                next_cursor = max(datetime.fromisoformat(r["received_at"]) for r in rows)
+                    serializable.append({
+                        key: _iso(value) if isinstance(value, datetime) else value
+                        for key, value in row.items()
+                    })
                 await websocket.send_text(json.dumps({
                     "type": "observations",
                     "count": len(rows),
-                    "cursor": next_cursor.isoformat(),
-                    "data": rows,
+                    "cursor": encode_cursor(next_cursor),
+                    "data": serializable,
                 }, separators=(",", ":")))
                 cursor = next_cursor
-                # If the batch was full, immediately drain the next page before sleeping.
                 if len(rows) >= 1000:
                     continue
             else:
-                await websocket.send_json({"type": "heartbeat", "cursor": cursor.isoformat()})
+                await websocket.send_json({"type": "heartbeat", "cursor": encode_cursor(cursor)})
             await asyncio.sleep(poll_seconds)
     except WebSocketDisconnect:
         return
