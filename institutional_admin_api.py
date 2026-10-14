@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from institutional_auth import create_client_key, disable_client
-from institutional_exports_v2 import generate_release, list_releases, release_manifest
+from institutional_exports_v3 import generate_release, list_releases, release_manifest
 from institutional_ops_api import admin_auth
 
 router = APIRouter(tags=["institutional-admin"])
