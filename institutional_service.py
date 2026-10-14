@@ -20,7 +20,7 @@ from db import connect
 from institutional_api import router as data_router
 from institutional_archive import archive_pending
 from institutional_graph import run_graph_pass
-from institutional_ingest import run_once
+from institutional_ingest_v2 import run_once
 from institutional_mapping import run_mapping_pass
 from institutional_ops_api import router as ops_router
 from institutional_qa import run_qa
