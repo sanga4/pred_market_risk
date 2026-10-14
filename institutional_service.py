@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from db import connect
+from institutional_admin_api import router as admin_router
 from institutional_api import router as data_router
 from institutional_archive import archive_pending
 from institutional_auth import authenticate_key, extract_bearer
@@ -162,10 +163,12 @@ def root():
         "docs": "/docs",
         "health": "/health",
         "stream": "/v1/stream",
+        "bulk_releases": "/v1/releases",
         "boundary": "EventRisk supplies observed and normalized event data; institutions own downstream scenarios and investment decisions.",
     }
 
 
 app.include_router(data_router)
 app.include_router(ops_router)
+app.include_router(admin_router)
 app.include_router(stream_router)
