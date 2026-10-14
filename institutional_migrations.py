@@ -1,13 +1,7 @@
 """Restart-safe schema migration runner for the institutional data plane.
 
-Institutional deployments must never blindly replay historical DDL on process restart.
-This module records each applied migration with a SHA-256 checksum, bootstraps the
-ledger for databases created before the ledger existed, and applies only missing
-migrations transactionally.
-
-The checksum guard is intentionally strict: once a migration has been applied, edit
-history by adding a new migration rather than mutating the old SQL file. A checksum
-mismatch fails closed so schema drift is visible instead of silently accepted.
+Institutional deployments never replay historical DDL on process restart. Applied
+migrations are checksum-locked; schema history advances only through new migrations.
 """
 
 from __future__ import annotations
@@ -28,6 +22,7 @@ MIGRATION_FILES = [
     "institutional_schema_008.sql",
     "institutional_schema_009.sql",
     "institutional_schema_010.sql",
+    "institutional_schema_011.sql",
 ]
 
 
@@ -51,7 +46,6 @@ def _column_exists(con, relation: str, column: str) -> bool:
 
 
 def _migration_appears_applied(con, name: str) -> bool:
-    """Infer legacy migration state without mutating institutional data."""
     if name == "institutional_schema.sql":
         return all(_table_exists(con, table) for table in (
             "er_raw_snapshots", "er_source_contracts", "er_market_observations", "er_canonical_events",
@@ -93,6 +87,13 @@ def _migration_appears_applied(con, name: str) -> bool:
             """SELECT count(*) FROM er_methodology_registry
                WHERE methodology_id='event_mapping' AND methodology_version='mapping_rules_v3_reviewable'"""
         ).fetchone()[0])
+    if name == "institutional_schema_011.sql":
+        return (
+            _table_exists(con, "er_source_versions")
+            and _table_exists(con, "er_entity_versions")
+            and _table_exists(con, "er_instrument_versions")
+            and _view_exists(con, "er_latest_entity_versions")
+        )
     return False
 
 
@@ -101,7 +102,6 @@ def _sha256(text: str) -> str:
 
 
 def ensure_schema() -> dict:
-    """Bring the institutional database to the current schema exactly once."""
     root = Path(__file__).parent
     con = connect()
     applied_now: list[str] = []
@@ -115,7 +115,6 @@ def ensure_schema() -> dict:
               bootstrapped BOOLEAN NOT NULL DEFAULT FALSE
             )
         """)
-
         existing_count = con.execute("SELECT count(*) FROM er_schema_migrations").fetchone()[0]
         if existing_count == 0:
             for name in MIGRATION_FILES:
@@ -140,7 +139,6 @@ def ensure_schema() -> dict:
                         "Add a new migration instead of editing an applied migration."
                     )
                 continue
-
             con.execute("BEGIN TRANSACTION")
             try:
                 con.execute(sql)
