@@ -10,38 +10,16 @@ from __future__ import annotations
 import logging
 import os
 import time
-from pathlib import Path
 
-from db import connect
 from institutional_archive_v2 import archive_pending
 from institutional_graph import run_graph_pass
 from institutional_ingest_v2 import run_once
 from institutional_mapping_v2 import run_mapping_pass
+from institutional_migrations import ensure_schema
 from institutional_ontology import run_ontology_pass
 from institutional_qa import run_qa
 
-SCHEMA_FILES = [
-    "institutional_schema.sql",
-    "institutional_schema_002.sql",
-    "institutional_schema_003.sql",
-    "institutional_schema_004.sql",
-    "institutional_schema_005.sql",
-    "institutional_schema_006.sql",
-    "institutional_schema_007.sql",
-    "institutional_schema_008.sql",
-]
-
 log = logging.getLogger("eventrisk.worker")
-
-
-def ensure_schema():
-    root = Path(__file__).parent
-    con = connect()
-    try:
-        for name in SCHEMA_FILES:
-            con.execute((root / name).read_text())
-    finally:
-        con.close()
 
 
 def cycle() -> dict:
@@ -66,7 +44,8 @@ def cycle() -> dict:
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    ensure_schema()
+    migration_state = ensure_schema()
+    log.info("schema ready %s", migration_state)
     interval = max(300, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")))
     once = os.getenv("RUN_ONCE", "false").lower() in {"1", "true", "yes"}
     while True:
