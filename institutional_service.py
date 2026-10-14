@@ -11,7 +11,6 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -25,6 +24,7 @@ from institutional_graph import run_graph_pass
 from institutional_history_api import router as history_router
 from institutional_ingest_v2 import run_once
 from institutional_mapping_v2 import run_mapping_pass
+from institutional_migrations import ensure_schema
 from institutional_ontology import run_ontology_pass
 from institutional_ops_api import router as ops_router
 from institutional_qa import run_qa
@@ -35,27 +35,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 log = logging.getLogger("eventrisk.institutional_service")
-
-SCHEMA_FILES = [
-    "institutional_schema.sql",
-    "institutional_schema_002.sql",
-    "institutional_schema_003.sql",
-    "institutional_schema_004.sql",
-    "institutional_schema_005.sql",
-    "institutional_schema_006.sql",
-    "institutional_schema_007.sql",
-    "institutional_schema_008.sql",
-]
-
-
-def ensure_schema():
-    root = Path(__file__).parent
-    con = connect()
-    try:
-        for name in SCHEMA_FILES:
-            con.execute((root / name).read_text())
-    finally:
-        con.close()
 
 
 def pipeline_cycle():
@@ -97,11 +76,15 @@ async def collector_loop(stop: asyncio.Event):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    ensure_schema()
+    migration_state = ensure_schema()
     stop = asyncio.Event()
     task = None
     collector_enabled = os.getenv("ENABLE_BACKGROUND_COLLECTOR", "false").lower() in {"1", "true", "yes"}
-    log.info("institutional service startup schema_ready=true collector_enabled=%s", collector_enabled)
+    log.info(
+        "institutional service startup schema_ready=true migrations=%s collector_enabled=%s",
+        migration_state,
+        collector_enabled,
+    )
     if collector_enabled:
         task = asyncio.create_task(collector_loop(stop))
     yield
@@ -162,6 +145,9 @@ def health():
             ).fetchone()[0]
             counts["verified_archive_rows"] = con.execute(
                 "SELECT count(*) FROM er_raw_archive_objects WHERE status='archived'"
+            ).fetchone()[0]
+            counts["schema_migrations"] = con.execute(
+                "SELECT count(*) FROM er_schema_migrations"
             ).fetchone()[0]
             sources = con.execute(
                 "SELECT source_id,health_status,last_success_at,last_observation_at FROM er_source_health ORDER BY source_id"
