@@ -23,10 +23,17 @@ log = logging.getLogger("eventrisk.worker")
 
 def cycle() -> dict:
     ingest = run_once()
+    failed_sources = [r for r in ingest if r.get("status") != "success"]
+    if failed_sources:
+        raise RuntimeError(f"One or more source ingestions failed: {failed_sources}")
+
     archive = archive_pending(
         max_rows=int(os.getenv("RAW_ARCHIVE_MAX_ROWS", "20000")),
         bundle_rows=int(os.getenv("RAW_ARCHIVE_BATCH_SIZE", "5000")),
     )
+    if archive.get("configured") and archive.get("failed", 0):
+        raise RuntimeError(f"Raw archive failed for {archive['failed']} snapshot(s): {archive}")
+
     mapping = run_mapping_pass()
     lifecycle = sync_event_lifecycle()
     ontology = run_ontology_pass()
@@ -34,6 +41,9 @@ def cycle() -> dict:
     reference_versions = sync_reference_versions()
     mapping_drift = persist_mapping_drift()
     qa = run_qa(stale_minutes=max(20, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")) // 60 * 4))
+    if qa.get("critical_issues", 0):
+        raise RuntimeError(f"Institutional QA has {qa['critical_issues']} open critical issue(s): {qa}")
+
     return {
         "ingest": ingest,
         "archive": archive,
@@ -61,6 +71,8 @@ def main():
             log.info("cycle completed %s", result)
         except Exception:
             log.exception("cycle failed")
+            if once:
+                raise
         if once:
             break
         elapsed = time.monotonic() - started
