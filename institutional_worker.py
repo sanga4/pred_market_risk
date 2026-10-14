@@ -1,9 +1,4 @@
-"""Dedicated production worker for EventRisk institutional ingestion.
-
-Staging can run collection inside the API process to fit the current Railway plan. A
-production deployment should run this worker separately from the read API so source
-latency or a mapping pass cannot reduce API availability.
-"""
+"""Dedicated production worker for EventRisk institutional ingestion."""
 
 from __future__ import annotations
 
@@ -12,12 +7,13 @@ import os
 import time
 
 from institutional_archive_v2 import archive_pending
-from institutional_graph import run_graph_pass
+from institutional_graph_v2 import run_graph_pass
 from institutional_ingest_v2 import run_once
 from institutional_mapping_v3 import run_mapping_pass
 from institutional_migrations import ensure_schema
 from institutional_ontology import run_ontology_pass
 from institutional_qa_v2 import run_qa
+from institutional_reference_versions import sync_reference_versions
 
 log = logging.getLogger("eventrisk.worker")
 
@@ -31,6 +27,7 @@ def cycle() -> dict:
     mapping = run_mapping_pass()
     ontology = run_ontology_pass()
     graph = run_graph_pass()
+    reference_versions = sync_reference_versions()
     qa = run_qa(stale_minutes=max(20, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")) // 60 * 4))
     return {
         "ingest": ingest,
@@ -38,6 +35,7 @@ def cycle() -> dict:
         "mapping": mapping,
         "ontology": ontology,
         "graph": graph,
+        "reference_versions": reference_versions,
         "qa": qa,
     }
 
