@@ -22,6 +22,7 @@ MIGRATION_FILES = [
     "institutional_schema_012.sql",
     "institutional_schema_013.sql",
     "institutional_schema_014.sql",
+    "institutional_schema_015.sql",
 ]
 
 
@@ -37,6 +38,15 @@ def _column_exists(con, relation: str, column: str) -> bool:
     return bool(con.execute(
         "SELECT count(*) FROM information_schema.columns WHERE table_name=? AND column_name=?",
         [relation, column],
+    ).fetchone()[0])
+
+
+def _method_exists(con, methodology_id: str, version: str) -> bool:
+    if not _table_exists(con, "er_methodology_registry"):
+        return False
+    return bool(con.execute(
+        "SELECT count(*) FROM er_methodology_registry WHERE methodology_id=? AND methodology_version=?",
+        [methodology_id, version],
     ).fetchone()[0])
 
 
@@ -78,9 +88,7 @@ def _migration_appears_applied(con, name: str) -> bool:
             and _view_exists(con, "er_served_canonical_events")
         )
     if name == "institutional_schema_010.sql":
-        return _table_exists(con, "er_methodology_registry") and bool(con.execute(
-            "SELECT count(*) FROM er_methodology_registry WHERE methodology_id='event_mapping' AND methodology_version='mapping_rules_v3_reviewable'"
-        ).fetchone()[0])
+        return _method_exists(con, "event_mapping", "mapping_rules_v3_reviewable")
     if name == "institutional_schema_011.sql":
         return (
             _table_exists(con, "er_source_versions")
@@ -91,15 +99,17 @@ def _migration_appears_applied(con, name: str) -> bool:
     if name == "institutional_schema_012.sql":
         return _table_exists(con, "er_contract_semantic_versions") and _view_exists(con, "er_latest_contract_semantic_versions")
     if name == "institutional_schema_013.sql":
-        return _table_exists(con, "er_methodology_registry") and bool(con.execute(
-            "SELECT count(*) FROM er_methodology_registry WHERE methodology_id='bulk_release' AND methodology_version='institutional_exports_v3'"
-        ).fetchone()[0])
+        return _method_exists(con, "bulk_release", "institutional_exports_v3")
     if name == "institutional_schema_014.sql":
         return (
             _table_exists(con, "er_contract_presence_state")
             and _table_exists(con, "er_contract_presence_transitions")
             and _column_exists(con, "er_ingestion_runs", "collection_scope")
             and _view_exists(con, "er_contract_presence_status")
+        )
+    if name == "institutional_schema_015.sql":
+        return _method_exists(con, "data_quality", "institutional_qa_v3") and _method_exists(
+            con, "distribution_readiness", "institutional_readiness_v3"
         )
     return False
 
