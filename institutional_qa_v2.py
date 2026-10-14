@@ -1,7 +1,8 @@
 """Additional institutional-grade QA controls layered on the existing QA suite.
 
-These checks focus on semantic/temporal integrity introduced by canonical mapping and
-bulk distribution. They never mutate source observations or silently repair mappings.
+These checks focus on semantic/temporal integrity introduced by canonical mapping,
+prospective full contract semantics, reference-master versioning and bulk distribution.
+They never mutate source observations or silently repair mappings.
 """
 
 from __future__ import annotations
@@ -61,7 +62,6 @@ def check_mapping_targets_distributable_events(con) -> int:
 
 
 def check_point_in_time_mapping_cardinality(con) -> int:
-    """Every institutional observation must resolve to exactly one mapping at receipt time."""
     rows = con.execute(
         """SELECT o.source_contract_id,o.observed_at,o.received_at,count(m.mapping_id) mapping_count
            FROM er_market_observations o
@@ -73,9 +73,8 @@ def check_point_in_time_mapping_cardinality(con) -> int:
            GROUP BY o.source_contract_id,o.observed_at,o.received_at
            HAVING count(m.mapping_id)<>1"""
     ).fetchall()
-    bad = set()
+    bad_contracts = {r[0] for r in rows}
     for contract_id, observed_at, received_at, count in rows:
-        bad.add(contract_id)
         base.open_issue(
             con,
             "source_contract",
@@ -84,6 +83,9 @@ def check_point_in_time_mapping_cardinality(con) -> int:
             "critical",
             f"Observation observed_at={observed_at} received_at={received_at} resolves to {count} mappings",
         )
+    for (contract_id,) in con.execute("SELECT source_contract_id FROM er_source_contracts").fetchall():
+        if contract_id not in bad_contracts:
+            base.resolve_issue(con, "source_contract", contract_id, "point_in_time_mapping_cardinality")
     return len(rows)
 
 
@@ -118,6 +120,60 @@ def check_reviewed_relationship_provenance(con) -> int:
         if relationship_id not in bad:
             base.resolve_issue(con, "event_relationship", relationship_id, "reviewed_relationship_provenance_incomplete")
     return len(rows)
+
+
+def check_active_contract_semantic_coverage(con) -> int:
+    rows = con.execute(
+        """SELECT c.source_contract_id,c.source_id,c.source_market_id
+           FROM er_source_contracts c
+           LEFT JOIN er_latest_contract_semantic_versions v USING(source_contract_id)
+           WHERE c.active=TRUE
+             AND (v.source_contract_id IS NULL OR coalesce(v.metadata_completeness,'')<>'full_v2'
+                  OR v.event_raw_snapshot_id IS NULL OR v.market_raw_snapshot_id IS NULL)"""
+    ).fetchall()
+    bad = {r[0] for r in rows}
+    for contract_id, source_id, market_id in rows:
+        base.open_issue(
+            con,
+            "source_contract",
+            contract_id,
+            "active_contract_missing_full_semantics",
+            "critical",
+            f"Active contract {source_id}:{market_id} lacks full_v2 semantic normalization with both raw evidence pointers",
+        )
+    for (contract_id,) in con.execute("SELECT source_contract_id FROM er_source_contracts").fetchall():
+        if contract_id not in bad:
+            base.resolve_issue(con, "source_contract", contract_id, "active_contract_missing_full_semantics")
+    return len(rows)
+
+
+def check_reference_master_versions(con) -> int:
+    failures = 0
+    for current, versioned, object_type, id_col in [
+        ("er_sources", "er_latest_source_versions", "source", "source_id"),
+        ("er_entities", "er_latest_entity_versions", "entity", "entity_id"),
+        ("er_instruments", "er_latest_instrument_versions", "instrument", "instrument_id"),
+    ]:
+        rows = con.execute(
+            f"""SELECT c.{id_col}
+                FROM {current} c LEFT JOIN {versioned} v USING({id_col})
+                WHERE v.{id_col} IS NULL"""
+        ).fetchall()
+        failures += len(rows)
+        bad = {r[0] for r in rows}
+        for (object_id,) in rows:
+            base.open_issue(
+                con,
+                object_type,
+                object_id,
+                "reference_master_missing_version",
+                "high",
+                f"Current {object_type} master row has no point-in-time version record",
+            )
+        for (object_id,) in con.execute(f"SELECT {id_col} FROM {current}").fetchall():
+            if object_id not in bad:
+                base.resolve_issue(con, object_type, object_id, "reference_master_missing_version")
+    return failures
 
 
 def check_ready_release_manifests(con) -> int:
@@ -171,6 +227,8 @@ def run_qa(stale_minutes: int = 20) -> dict:
             "mapping_targets": check_mapping_targets_distributable_events(con),
             "point_in_time_mapping_cardinality": check_point_in_time_mapping_cardinality(con),
             "reviewed_relationship_provenance": check_reviewed_relationship_provenance(con),
+            "active_contract_semantic_coverage": check_active_contract_semantic_coverage(con),
+            "reference_master_versions": check_reference_master_versions(con),
             "ready_release_manifests": check_ready_release_manifests(con),
             "migration_ledger": check_migration_ledger(con),
         }
