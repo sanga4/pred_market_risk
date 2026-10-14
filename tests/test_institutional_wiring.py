@@ -9,7 +9,7 @@ def text(name: str) -> str:
 
 def test_all_runtime_migration_paths_use_shared_ledger():
     migration_runner = text("institutional_migrations.py")
-    assert '"institutional_schema_016.sql"' in migration_runner
+    assert '"institutional_schema_017.sql"' in migration_runner
     assert "er_schema_migrations" in migration_runner
 
     for name in ["institutional_service.py", "institutional_worker.py", "migrate_institutional.py"]:
@@ -30,6 +30,7 @@ def test_runtime_collectors_use_verified_archive_batch_ingest_and_versioned_grap
         assert "from institutional_graph_v2 import run_graph_pass" in body
         assert "from institutional_reference_versions import sync_reference_versions" in body
         assert "from institutional_qa_v3 import run_qa" in body
+        assert "from institutional_run_recovery import recover_abandoned_runs" in body
         assert "RAW_ARCHIVE_MAX_ROWS" in body
         assert "RAW_ARCHIVE_BATCH_SIZE" in body
 
@@ -56,7 +57,7 @@ def test_admin_release_path_uses_v3_point_in_time_generator():
     assert "later closure fields masked" in body
 
 
-def test_latest_schema_contains_point_in_time_semantic_and_presence_provenance():
+def test_latest_schema_contains_point_in_time_semantic_presence_and_ops_provenance():
     schema9 = text("institutional_schema_009.sql")
     for value in [
         "er_event_curve_as_known", "er_event_curve_current_taxonomy", "er_served_canonical_events",
@@ -83,6 +84,9 @@ def test_latest_schema_contains_point_in_time_semantic_and_presence_provenance()
     schema16 = text("institutional_schema_016.sql")
     for value in ["set_based_ingest_v4", "compound_cursor_v2_1", "compound_cursor_changefeed_v1"]:
         assert value in schema16
+
+    schema17 = text("institutional_schema_017.sql")
+    assert "ingestion_run_recovery_v1" in schema17
 
 
 def test_raw_bundle_schema_exists():
