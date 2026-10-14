@@ -11,7 +11,12 @@ def setup_database(monkeypatch, tmp_path):
     ensure_schema()
 
 
-def seed_interval(con, *, title="Will China blockade Taiwan before 2028?"):
+def seed_interval(
+    con,
+    *,
+    title="Will China blockade Taiwan before 2028?",
+    resolution_rules="YES if China begins a blockade affecting Taiwan.",
+):
     received = datetime(2026, 10, 14, 20, 0, tzinfo=timezone.utc)
     close = datetime(2027, 12, 31, tzinfo=timezone.utc)
     con.execute("""
@@ -34,7 +39,7 @@ def seed_interval(con, *, title="Will China blockade Taiwan before 2028?"):
         VALUES ('sc-1','kalshi','KX-TW',?,?,'active',?,?,?,?,?,?,TRUE)
     """, [
         title, f"Description: {title}", received-timedelta(days=30), close, close,
-        "YES if China begins a blockade affecting Taiwan.", received, received,
+        resolution_rules, received, received,
     ])
     con.execute("""
         INSERT INTO er_contract_semantic_versions(
@@ -44,7 +49,7 @@ def seed_interval(con, *, title="Will China blockade Taiwan before 2028?"):
         VALUES ('sc-1',1,'kalshi','KX-TW',?,?,'binary','active',?,?,?,?,?,?,'raw-event','raw-market','full_v2')
     """, [
         title, f"Description: {title}", received-timedelta(days=30), close, close,
-        "YES if China begins a blockade affecting Taiwan.", received, received,
+        resolution_rules, received, received,
     ])
     con.execute("""
         INSERT INTO er_event_families(event_family_id,canonical_name,category)
@@ -172,13 +177,18 @@ def test_graph_v3_alias_change_reprocesses_intervals_and_adds_new_identity_match
     setup_database(monkeypatch, tmp_path)
     con = db.connect()
     try:
-        seed_interval(con, title="Will Formosa face a blockade before 2028?")
+        seed_interval(
+            con,
+            title="Will Formosa face a blockade before 2028?",
+            resolution_rules="YES if a blockade prevents commercial shipping for 24 hours.",
+        )
     finally:
         con.close()
 
     from institutional_graph_v3 import GRAPH_VERSION, run_graph_pass
     import institutional_graph as base
     first = run_graph_pass()
+    assert first["mention_edges_written"] == 0
     taiwan_edge = base.stable_id("edge", "map-1", "sc-1", 1, "mentions", "geo_taiwan", GRAPH_VERSION)
     con = db.connect()
     try:
