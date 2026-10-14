@@ -1,31 +1,9 @@
-from pathlib import Path
-
-from db import connect
-
-
-MIGRATIONS = [
-    "institutional_schema.sql",
-    "institutional_schema_002.sql",
-    "institutional_schema_003.sql",
-    "institutional_schema_004.sql",
-    "institutional_schema_005.sql",
-    "institutional_schema_006.sql",
-    "institutional_schema_007.sql",
-    "institutional_schema_008.sql",
-]
+from institutional_migrations import ensure_schema
 
 
 def main():
-    root = Path(__file__).parent
-    con = connect()
-    try:
-        for name in MIGRATIONS:
-            sql = (root / name).read_text()
-            con.execute(sql)
-            print(f"applied {name}")
-        print("institutional schema ready")
-    finally:
-        con.close()
+    state = ensure_schema()
+    print(f"institutional schema ready: {state}")
 
 
 if __name__ == "__main__":
