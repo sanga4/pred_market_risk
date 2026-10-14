@@ -1,13 +1,12 @@
 """Institutional data-quality checks for EventRisk.
 
-The QA layer does not alter source data.  It opens/resolves quality issues so downstream
+The QA layer does not alter source data. It opens/resolves quality issues so downstream
 clients can see freshness, completeness, mapping ambiguity and impossible market states.
 """
 
 from __future__ import annotations
 
 import hashlib
-import uuid
 from datetime import datetime, timezone
 
 from db import connect
@@ -79,15 +78,19 @@ def check_crossed_books(con) -> int:
 
 
 def check_missing_raw_lineage(con) -> int:
+    # Legacy collector observations are intentionally exempt: their missing raw payloads are
+    # disclosed once at dataset level by the migration. Every institutional-era observation
+    # must trace to an immutable raw source snapshot.
     rows = con.execute(
         """SELECT DISTINCT o.source_contract_id
            FROM er_market_observations o
            LEFT JOIN er_raw_snapshots r ON r.raw_snapshot_id=o.raw_snapshot_id
-           WHERE o.raw_snapshot_id IS NULL OR r.raw_snapshot_id IS NULL"""
+           WHERE coalesce(o.methodology_version,'') <> 'legacy_collector_v0.3'
+             AND (o.raw_snapshot_id IS NULL OR r.raw_snapshot_id IS NULL)"""
     ).fetchall()
     for (contract_id,) in rows:
         open_issue(con, "source_contract", contract_id, "observation_missing_raw_lineage", "critical",
-                   "One or more observations cannot be traced to an immutable raw snapshot")
+                   "One or more institutional-era observations cannot be traced to an immutable raw snapshot")
     return len(rows)
 
 
