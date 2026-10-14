@@ -12,11 +12,24 @@ def setup_database(monkeypatch, tmp_path):
 
 
 def seed_contract(con, contract_id, source_id, market_id, title, rules, close, received):
+    event_raw_id = f"raw_event_{contract_id}"
+    market_raw_id = f"raw_market_{contract_id}"
     con.execute("""
         INSERT INTO er_sources(source_id,source_name,source_type,active)
         VALUES (?,?, 'prediction_market', TRUE)
         ON CONFLICT(source_id) DO NOTHING
     """, [source_id, source_id.title()])
+    con.execute("""
+        INSERT INTO er_raw_snapshots(
+          raw_snapshot_id,source_id,source_object_type,source_object_id,source_observed_at,
+          received_at,content_hash,payload_json,ingestion_run_id)
+        VALUES
+          (?,?,'event',?,?,?,NULL,'{}','test-run'),
+          (?,?,'market',?,?,?,NULL,'{}','test-run')
+    """, [
+        event_raw_id, source_id, f"event-{market_id}", received, received,
+        market_raw_id, source_id, market_id, received, received,
+    ])
     con.execute("""
         INSERT INTO er_source_contracts(
           source_contract_id,source_id,source_market_id,current_title,current_description,status,
@@ -29,11 +42,13 @@ def seed_contract(con, contract_id, source_id, market_id, title, rules, close, r
     con.execute("""
         INSERT INTO er_contract_semantic_versions(
           source_contract_id,version_no,source_id,source_market_id,title,description,outcome_type,status,
-          opens_at,closes_at,resolves_at,resolution_rules,received_at,valid_from,metadata_completeness)
-        VALUES (?,?,?,?,?,?,'binary','active',?,?,?,?,?,?,'full_v2')
+          opens_at,closes_at,resolves_at,resolution_rules,received_at,valid_from,
+          event_raw_snapshot_id,market_raw_snapshot_id,metadata_completeness)
+        VALUES (?,?,?,?,?,?,'binary','active',?,?,?,?,?,?,?,?,?,'full_v2')
     """, [
         contract_id, 1, source_id, market_id, title, f"Description {title}",
         received - timedelta(days=30), close, close, rules, received, received,
+        event_raw_id, market_raw_id,
     ])
 
 
@@ -151,9 +166,11 @@ def test_only_changed_semantics_reenter_mapping_work_queue(monkeypatch, tmp_path
         con.execute("""
             INSERT INTO er_contract_semantic_versions(
               source_contract_id,version_no,source_id,source_market_id,title,description,outcome_type,status,
-              opens_at,closes_at,resolves_at,resolution_rules,received_at,valid_from,metadata_completeness)
+              opens_at,closes_at,resolves_at,resolution_rules,received_at,valid_from,
+              event_raw_snapshot_id,market_raw_snapshot_id,metadata_completeness)
             SELECT source_contract_id,2,source_id,source_market_id,title,'Updated description',outcome_type,status,
-                   opens_at,closes_at,resolves_at,'YES if headline CPI is above 3 percent.',?,?,'full_v2'
+                   opens_at,closes_at,resolves_at,'YES if headline CPI is above 3 percent.',?, ?,
+                   event_raw_snapshot_id,market_raw_snapshot_id,'full_v2'
             FROM er_contract_semantic_versions WHERE source_contract_id='sc_k' AND version_no=1
         """, [changed_at, changed_at])
         con.execute("""
