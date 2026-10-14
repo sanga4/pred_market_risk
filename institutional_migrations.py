@@ -26,6 +26,7 @@ MIGRATION_FILES = [
     "institutional_schema_016.sql",
     "institutional_schema_017.sql",
     "institutional_schema_018.sql",
+    "institutional_schema_019.sql",
 ]
 
 
@@ -127,6 +128,8 @@ def _migration_appears_applied(con, name: str) -> bool:
             and _view_exists(con, "er_mapping_work_queue")
             and _method_exists(con, "event_mapping", "mapping_rules_v4_batched")
         )
+    if name == "institutional_schema_019.sql":
+        return _method_exists(con, "source_ingestion", "parallel_fetch_serial_write_v5")
     return False
 
 
