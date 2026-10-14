@@ -1,7 +1,7 @@
 """Production institutional ingestion orchestration.
 
 This module wraps the source adapters and storage primitives in institutional_ingest.py,
-but deduplicates event-level raw payloads within an ingestion run.  A source event with
+but deduplicates event-level raw payloads within an ingestion run. A source event with
 many child contracts is archived once per pull, while each child market/contract retains
 its own immutable market snapshot and observation.
 """
@@ -11,12 +11,24 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 import institutional_ingest as base
 from db import connect
 
 log = logging.getLogger("eventrisk.institutional_ingest_v2")
+
+
+def precise_now_utc() -> datetime:
+    """Receipt clock for the institutional ledger; preserve microseconds."""
+    return datetime.now(timezone.utc)
+
+
+# The legacy helper intentionally rounded to seconds. The institutional append-only ledger
+# can receive multiple versions inside one second, so all storage primitives must use a
+# microsecond receipt clock. Source-observed timestamps are never modified.
+base.now_utc = precise_now_utc
 
 # Public aliases used by tests and callers.
 ContractSnapshot = base.ContractSnapshot
@@ -26,7 +38,7 @@ insert_raw = base.insert_raw
 upsert_contract = base.upsert_contract
 insert_observation = base.insert_observation
 update_health = base.update_health
-now_utc = base.now_utc
+now_utc = precise_now_utc
 
 
 def ingest_source(source_id: str) -> dict:
