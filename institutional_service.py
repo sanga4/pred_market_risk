@@ -33,6 +33,7 @@ from institutional_ops_api import router as ops_router
 from institutional_qa_v3 import run_qa
 from institutional_readiness_api import router as readiness_router
 from institutional_reference_versions import sync_reference_versions
+from institutional_run_recovery import recover_abandoned_runs
 from institutional_stream import router as stream_router
 
 logging.basicConfig(
@@ -88,10 +89,14 @@ async def collector_loop(stop: asyncio.Event):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     migration_state = ensure_schema()
+    recovery_state = recover_abandoned_runs()
     stop = asyncio.Event()
     task = None
     collector_enabled = os.getenv("ENABLE_BACKGROUND_COLLECTOR", "false").lower() in {"1", "true", "yes"}
-    log.info("institutional service startup schema_ready=true migrations=%s collector_enabled=%s", migration_state, collector_enabled)
+    log.info(
+        "institutional service startup schema_ready=true migrations=%s run_recovery=%s collector_enabled=%s",
+        migration_state, recovery_state, collector_enabled,
+    )
     if collector_enabled:
         task = asyncio.create_task(collector_loop(stop))
     yield
