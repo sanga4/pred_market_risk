@@ -1,8 +1,7 @@
 """Standalone EventRisk institutional data service.
 
-This is intentionally separate from the retail FastAPI application. In staging it can
-run the collector in-process against a local DuckDB volume. In production the same
-collector code can move to a dedicated worker against a shared analytical store.
+The API is isolated from the retail app. Staging may run collection in-process; production
+can move the same cycle to a dedicated worker without changing data semantics.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from institutional_api import router as data_router
 from institutional_archive_v2 import archive_pending
 from institutional_auth import authenticate_key, extract_bearer
 from institutional_curve_api import router as curve_router
-from institutional_graph import run_graph_pass
+from institutional_graph_v2 import run_graph_pass
 from institutional_history_api import router as history_router
 from institutional_ingest_v2 import run_once
 from institutional_mapping_v3 import run_mapping_pass
@@ -30,6 +29,7 @@ from institutional_ontology import run_ontology_pass
 from institutional_ops_api import router as ops_router
 from institutional_qa_v2 import run_qa
 from institutional_readiness_api import router as readiness_router
+from institutional_reference_versions import sync_reference_versions
 from institutional_stream import router as stream_router
 
 logging.basicConfig(
@@ -48,6 +48,7 @@ def pipeline_cycle():
     mapping = run_mapping_pass()
     ontology = run_ontology_pass()
     graph = run_graph_pass()
+    reference_versions = sync_reference_versions()
     qa = run_qa(stale_minutes=max(20, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")) // 60 * 4))
     return {
         "ingest": ingest,
@@ -55,6 +56,7 @@ def pipeline_cycle():
         "mapping": mapping,
         "ontology": ontology,
         "graph": graph,
+        "reference_versions": reference_versions,
         "qa": qa,
     }
 
@@ -121,9 +123,8 @@ async def institutional_auth(request: Request, call_next):
         if client is None:
             return JSONResponse({"detail": "Valid EventRisk API key required"}, status_code=401)
         request.state.eventrisk_client = client
-
     response = await call_next(request)
-    response.headers["X-EventRisk-Schema-Version"] = "v1.7"
+    response.headers["X-EventRisk-Schema-Version"] = "v1.9"
     response.headers["X-EventRisk-Data-Layer"] = "observed+normalized"
     return response
 
@@ -135,25 +136,14 @@ def health():
         try:
             counts = {}
             for table in [
-                "er_raw_snapshots",
-                "er_raw_archive_objects",
-                "er_source_contracts",
-                "er_market_observations",
-                "er_canonical_events",
+                "er_raw_snapshots", "er_raw_archive_objects", "er_source_contracts",
+                "er_market_observations", "er_canonical_events",
             ]:
                 counts[table] = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-            counts["served_canonical_events"] = con.execute(
-                "SELECT count(*) FROM er_served_canonical_events"
-            ).fetchone()[0]
-            counts["raw_database_bodies"] = con.execute(
-                "SELECT count(*) FROM er_raw_snapshots WHERE payload_json IS NOT NULL"
-            ).fetchone()[0]
-            counts["verified_archive_rows"] = con.execute(
-                "SELECT count(*) FROM er_raw_archive_objects WHERE status='archived'"
-            ).fetchone()[0]
-            counts["schema_migrations"] = con.execute(
-                "SELECT count(*) FROM er_schema_migrations"
-            ).fetchone()[0]
+            counts["served_canonical_events"] = con.execute("SELECT count(*) FROM er_served_canonical_events").fetchone()[0]
+            counts["raw_database_bodies"] = con.execute("SELECT count(*) FROM er_raw_snapshots WHERE payload_json IS NOT NULL").fetchone()[0]
+            counts["verified_archive_rows"] = con.execute("SELECT count(*) FROM er_raw_archive_objects WHERE status='archived'").fetchone()[0]
+            counts["schema_migrations"] = con.execute("SELECT count(*) FROM er_schema_migrations").fetchone()[0]
             sources = con.execute(
                 "SELECT source_id,health_status,last_success_at,last_observation_at FROM er_source_health ORDER BY source_id"
             ).fetchall()
