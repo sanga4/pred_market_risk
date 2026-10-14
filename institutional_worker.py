@@ -1,6 +1,6 @@
 """Dedicated production worker for EventRisk institutional ingestion.
 
-Staging can run collection inside the API process to fit the current Railway plan.  A
+Staging can run collection inside the API process to fit the current Railway plan. A
 production deployment should run this worker separately from the read API so source
 latency or a mapping pass cannot reduce API availability.
 """
@@ -26,6 +26,7 @@ SCHEMA_FILES = [
     "institutional_schema_003.sql",
     "institutional_schema_004.sql",
     "institutional_schema_005.sql",
+    "institutional_schema_006.sql",
 ]
 
 log = logging.getLogger("eventrisk.worker")
