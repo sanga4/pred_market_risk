@@ -1,0 +1,26 @@
+name: institutional-ci
+
+on:
+  push:
+    branches: [institutional-data-v1]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+      - name: Compile institutional modules
+        run: |
+          python -m py_compile institutional_ingest.py institutional_mapping.py institutional_graph.py institutional_qa.py institutional_api.py institutional_ops_api.py institutional_service.py
+      - name: Run institutional tests
+        run: pytest -q tests/test_institutional_pipeline.py
