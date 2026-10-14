@@ -11,10 +11,14 @@ def setup_legacy_database(tmp_path):
     root = Path(__file__).resolve().parents[1]
     con = db.connect()
     try:
-        con.execute((root / "institutional_schema.sql").read_text())
-        con.execute((root / "institutional_schema_002.sql").read_text())
-        con.execute((root / "institutional_schema_003.sql").read_text())
-        con.execute((root / "institutional_schema_004.sql").read_text())
+        for name in [
+            "institutional_schema.sql",
+            "institutional_schema_002.sql",
+            "institutional_schema_003.sql",
+            "institutional_schema_004.sql",
+            "institutional_schema_005.sql",
+        ]:
+            con.execute((root / name).read_text())
         con.execute("""CREATE TABLE ticks(
           ts TIMESTAMPTZ, venue VARCHAR, market_id VARCHAR, event_id VARCHAR,
           event_title VARCHAR, market_title VARCHAR, close_time TIMESTAMPTZ,
@@ -53,10 +57,10 @@ def test_legacy_backfill_is_explicit_and_nonfabricated(tmp_path):
     con = db.connect()
     try:
         contract = con.execute(
-            "SELECT source_contract_id FROM er_source_contracts WHERE source_id='kalshi' AND source_market_id='KX-LEGACY'"
+            "SELECT source_contract_id,first_seen_at FROM er_source_contracts WHERE source_id='kalshi' AND source_market_id='KX-LEGACY'"
         ).fetchone()
         assert contract is not None
-        contract_id = contract[0]
+        contract_id, first_seen = contract
 
         version = con.execute(
             "SELECT version_no,raw_snapshot_id FROM er_source_contract_versions WHERE source_contract_id=?",
@@ -71,10 +75,11 @@ def test_legacy_backfill_is_explicit_and_nonfabricated(tmp_path):
         assert obs == ("legacy_collector_v0.3", None)
 
         mapping = con.execute(
-            "SELECT review_status FROM er_event_mappings WHERE source_contract_id=?",
+            "SELECT review_status,valid_from FROM er_event_mappings WHERE source_contract_id=?",
             [contract_id],
         ).fetchone()
-        assert mapping == ("legacy_unreviewed",)
+        assert mapping[0] == "legacy_unreviewed"
+        assert mapping[1] == first_seen
 
         disclosure = con.execute(
             "SELECT severity,status FROM er_quality_issues WHERE quality_issue_id='quality:legacy_raw_payload_unavailable'"
