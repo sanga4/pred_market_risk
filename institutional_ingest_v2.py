@@ -41,6 +41,37 @@ update_health = base.update_health
 now_utc = precise_now_utc
 
 
+def link_contract_version_evidence(
+    con,
+    contract_id: str,
+    event_raw_id: str,
+    market_raw_id: str,
+) -> None:
+    """Attach the normalized contract version to the exact raw payloads that support it.
+
+    A contract version is immutable. Repeated market pulls that do not change normalized
+    metadata therefore keep the original evidence links. When source metadata changes,
+    `upsert_contract` creates a new version and this function attaches the new source
+    event/market payloads to that version.
+    """
+    row = con.execute(
+        "SELECT max(version_no) FROM er_source_contract_versions WHERE source_contract_id=?",
+        [contract_id],
+    ).fetchone()
+    version_no = row[0] if row else None
+    if version_no is None:
+        raise RuntimeError(f"No contract version exists for {contract_id}")
+
+    for role, raw_id in (("event_payload", event_raw_id), ("market_payload", market_raw_id)):
+        con.execute(
+            """INSERT INTO er_contract_version_evidence(
+                 source_contract_id,version_no,evidence_role,raw_snapshot_id)
+               VALUES (?,?,?,?)
+               ON CONFLICT(source_contract_id,version_no,evidence_role) DO NOTHING""",
+            [contract_id, version_no, role, raw_id],
+        )
+
+
 def ingest_source(source_id: str) -> dict:
     if source_id not in ADAPTERS:
         raise ValueError(f"Unknown source {source_id}")
@@ -75,6 +106,7 @@ def ingest_source(source_id: str) -> dict:
                             run_id,
                         )
                         unique_events += 1
+                    event_raw_id = event_raw_ids[event_object_id]
 
                     market_raw_id = insert_raw(
                         con,
@@ -86,6 +118,7 @@ def ingest_source(source_id: str) -> dict:
                         run_id,
                     )
                     contract_id = upsert_contract(con, snapshot, market_raw_id)
+                    link_contract_version_evidence(con, contract_id, event_raw_id, market_raw_id)
                     insert_observation(con, snapshot, contract_id, market_raw_id)
                     written += 1
                 except Exception:
