@@ -53,4 +53,5 @@ SELECT
 FROM er_source_contract_versions v
 LEFT JOIN er_contract_version_evidence ev
   ON ev.source_contract_id=v.source_contract_id AND ev.version_no=v.version_no
-LEFT JOIN er_raw_snapshots r USING(raw_snapshot_id);
+LEFT JOIN er_raw_snapshots r
+  ON r.raw_snapshot_id=ev.raw_snapshot_id;
