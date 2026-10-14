@@ -8,7 +8,7 @@ import time
 
 from institutional_archive_v2 import archive_pending
 from institutional_graph_v2 import run_graph_pass
-from institutional_ingest_v3 import run_once
+from institutional_ingest_v4 import run_once
 from institutional_lifecycle import sync_event_lifecycle
 from institutional_mapping_drift import persist_mapping_drift
 from institutional_mapping_v3 import run_mapping_pass
