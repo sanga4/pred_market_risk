@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from datetime import datetime
 from typing import Optional
@@ -8,6 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from db import connect
+from institutional_archive_v2 import restore_payload
 from institutional_mapping import review_candidate
 
 router = APIRouter(tags=["institutional-ops"])
@@ -66,9 +69,66 @@ def get_contract(contract_id: str):
         mappings = rows_dict(con.execute(
             "SELECT * FROM er_event_mappings WHERE source_contract_id=? ORDER BY valid_from", [contract_id]
         ))
-        return {"contract": contract[0], "versions": versions, "mappings": mappings}
+        evidence = rows_dict(con.execute(
+            """SELECT e.*,r.source_id,r.source_object_type,r.source_object_id,r.source_observed_at,
+                      r.received_at,r.content_hash,r.payload_storage,a.status archive_status,
+                      a.archive_key,a.archive_member,a.archive_bundle_hash
+               FROM er_contract_version_evidence e
+               LEFT JOIN er_raw_snapshots r USING(raw_snapshot_id)
+               LEFT JOIN er_raw_archive_objects a USING(raw_snapshot_id)
+               WHERE e.source_contract_id=? ORDER BY e.version_no,e.evidence_role""",
+            [contract_id],
+        ))
+        return {"contract": contract[0], "versions": versions, "mappings": mappings, "evidence": evidence}
     finally:
         con.close()
+
+
+@router.get("/internal/raw-snapshots/{raw_snapshot_id}", dependencies=[Depends(admin_auth)])
+def raw_snapshot_audit(raw_snapshot_id: str):
+    """Restore one exact source payload and independently verify its recorded SHA-256.
+
+    This is intentionally administrative rather than public: it exists for lineage review,
+    incident investigation and reproducibility without implying raw-source redistribution rights.
+    """
+    con = db_read()
+    try:
+        rows = rows_dict(con.execute(
+            """SELECT r.raw_snapshot_id,r.source_id,r.source_object_type,r.source_object_id,
+                      r.source_observed_at,r.received_at,r.content_hash,r.payload_json,
+                      r.payload_storage,r.payload_compacted_at,r.ingestion_run_id,
+                      a.status archive_status,a.archive_key,a.archive_member,a.archive_bundle_hash,
+                      a.archived_at
+               FROM er_raw_snapshots r
+               LEFT JOIN er_raw_archive_objects a USING(raw_snapshot_id)
+               WHERE r.raw_snapshot_id=?""",
+            [raw_snapshot_id],
+        ))
+        if not rows:
+            raise HTTPException(404, "Raw snapshot not found")
+        meta = rows[0]
+        payload_json = meta.pop("payload_json")
+    finally:
+        con.close()
+
+    if payload_json is not None:
+        payload = payload_json.encode("utf-8")
+        retrieval = "database"
+    else:
+        try:
+            payload = restore_payload(raw_snapshot_id)
+            retrieval = "verified_object_archive"
+        except Exception as exc:
+            raise HTTPException(503, f"Archived raw payload could not be restored: {exc}")
+
+    digest = hashlib.sha256(payload).hexdigest()
+    if digest != meta.get("content_hash"):
+        raise HTTPException(500, "Raw payload failed integrity verification")
+    try:
+        parsed = json.loads(payload.decode("utf-8"))
+    except Exception:
+        parsed = payload.decode("utf-8", errors="replace")
+    return {"metadata": meta, "retrieval": retrieval, "hash_verified": True, "payload": parsed}
 
 
 @router.get("/v1/events/{event_id}/as-of")
