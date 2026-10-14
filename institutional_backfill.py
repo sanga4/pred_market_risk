@@ -58,6 +58,36 @@ def main():
             """
         )
 
+        # Create an explicit legacy metadata version for every migrated contract.  It has
+        # no raw_snapshot_id because those payloads genuinely were not preserved.
+        con.execute(
+            """
+            INSERT INTO er_source_contract_versions(
+              source_contract_id, version_no, title, description, status,
+              resolution_rules, opens_at, closes_at, resolves_at,
+              source_observed_at, received_at, valid_from, valid_to, raw_snapshot_id
+            )
+            SELECT
+              c.source_contract_id,
+              1,
+              c.current_title,
+              c.current_description,
+              CASE WHEN c.active THEN 'active' ELSE 'legacy_inactive' END,
+              c.current_resolution_rules,
+              c.opens_at,
+              c.closes_at,
+              c.resolves_at,
+              c.last_seen_at,
+              c.last_seen_at,
+              c.first_seen_at,
+              NULL,
+              NULL
+            FROM er_source_contracts c
+            WHERE c.source_id IN ('kalshi', 'polymarket')
+            ON CONFLICT(source_contract_id, version_no) DO NOTHING
+            """
+        )
+
         # Preserve the existing canonicalization as a legacy layer, without claiming it
         # satisfies the new ontology or review requirements.
         con.execute(
