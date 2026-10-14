@@ -19,10 +19,11 @@ from institutional_admin_api import router as admin_router
 from institutional_api import router as data_router
 from institutional_archive_v2 import archive_pending
 from institutional_auth import authenticate_key, extract_bearer
+from institutional_changefeed_api import router as changefeed_router
 from institutional_curve_api import router as curve_router
 from institutional_graph_v2 import run_graph_pass
 from institutional_history_api import router as history_router
-from institutional_ingest_v3 import run_once
+from institutional_ingest_v4 import run_once
 from institutional_lifecycle import sync_event_lifecycle
 from institutional_mapping_drift import persist_mapping_drift
 from institutional_mapping_v3 import run_mapping_pass
@@ -126,7 +127,7 @@ async def institutional_auth(request: Request, call_next):
             return JSONResponse({"detail": "Valid EventRisk API key required"}, status_code=401)
         request.state.eventrisk_client = client
     response = await call_next(request)
-    response.headers["X-EventRisk-Schema-Version"] = "v2.1"
+    response.headers["X-EventRisk-Schema-Version"] = "v2.2"
     response.headers["X-EventRisk-Data-Layer"] = "observed+normalized"
     return response
 
@@ -178,6 +179,7 @@ def root():
         "health": "/health",
         "readiness": "/v1/readiness",
         "stream": "/v1/stream",
+        "change_feed": "/v1/change-feed",
         "bulk_releases": "/v1/releases",
         "boundary": "EventRisk supplies observed and normalized event data; institutions own downstream scenarios and investment decisions.",
     }
@@ -185,6 +187,7 @@ def root():
 
 app.include_router(data_router)
 app.include_router(curve_router)
+app.include_router(changefeed_router)
 app.include_router(ops_router)
 app.include_router(history_router)
 app.include_router(readiness_router)
