@@ -1,6 +1,7 @@
-"""Minimal Python SDK for the EventRisk institutional API.
+"""Python SDK for the EventRisk institutional data API.
 
-This intentionally exposes data primitives rather than portfolio recommendations.
+The SDK exposes observed/normalized data primitives rather than portfolio recommendations.
+Point-in-time-safe methods default to the mapping EventRisk actually knew when data arrived.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ class EventRisk:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "eventrisk-python/1.0"})
+        self.session.headers.update({"User-Agent": "eventrisk-python/1.7"})
         if api_key:
             self.session.headers["Authorization"] = f"Bearer {api_key}"
 
@@ -38,20 +39,56 @@ class EventRisk:
     def health(self):
         return self._get("/health")
 
+    def readiness(self):
+        return self._get("/v1/readiness")
+
     def sources(self):
         return self._get("/v1/sources")
 
-    def events(self, *, family_id=None, status="active", category=None, limit=100, offset=0):
+    def events(self, *, family_id=None, status="active", category=None, include_unserved=False, limit=100, offset=0):
         return self._get("/v1/events", {
             "family_id": family_id,
             "status": status,
             "category": category,
+            "include_unserved": str(include_unserved).lower(),
             "limit": limit,
             "offset": offset,
         })
 
     def event(self, event_id: str):
         return self._get(f"/v1/events/{event_id}")
+
+    def event_curve(
+        self,
+        event_id: str,
+        *,
+        mapping_basis: str = "as_known",
+        source_id: Optional[str] = None,
+        start: Optional[datetime | str] = None,
+        end: Optional[datetime | str] = None,
+        as_of: Optional[datetime | str] = None,
+        limit: int = 25000,
+    ):
+        return self._get(f"/v1/events/{event_id}/curve", {
+            "mapping_basis": mapping_basis,
+            "source_id": source_id,
+            "start": self._time(start),
+            "end": self._time(end),
+            "as_of": self._time(as_of),
+            "limit": limit,
+        })
+
+    def event_curve_latest(
+        self,
+        event_id: str,
+        *,
+        mapping_basis: str = "as_known",
+        at: Optional[datetime | str] = None,
+    ):
+        return self._get(f"/v1/events/{event_id}/curve/latest", {
+            "mapping_basis": mapping_basis,
+            "at": self._time(at),
+        })
 
     def event_history(
         self,
@@ -79,7 +116,6 @@ class EventRisk:
         end: Optional[datetime | str] = None,
         limit: int = 10000,
     ):
-        """History using the canonical mapping that was valid when EventRisk received each row."""
         return self._get(f"/v1/events/{event_id}/history-point-in-time", {
             "source_id": source_id,
             "start": self._time(start),
@@ -88,11 +124,9 @@ class EventRisk:
         })
 
     def event_as_of(self, event_id: str, at: datetime | str):
-        """Latest source observations by cutoff, using the endpoint's restated event identity."""
         return self._get(f"/v1/events/{event_id}/as-of", {"at": self._time(at)})
 
     def event_as_known(self, event_id: str, at: datetime | str):
-        """Canonical metadata and source observations exactly as EventRisk knew them at `at`."""
         return self._get(f"/v1/events/{event_id}/as-known", {"at": self._time(at)})
 
     def event_versions(self, event_id: str):
@@ -105,31 +139,27 @@ class EventRisk:
         return self._get(f"/v1/events/{event_id}/source-comparison")
 
     def term_structure(self, family_id: str, as_of: Optional[datetime | str] = None):
-        return self._get(
-            f"/v1/event-families/{family_id}/term-structure",
-            {"as_of": self._time(as_of)},
-        )
+        return self._get(f"/v1/event-families/{family_id}/term-structure", {"as_of": self._time(as_of)})
 
-    def event_relationships(self, event_id: str, *, include_inferred: bool = False):
-        return self._get(
-            f"/v1/events/{event_id}/relationships",
-            {"include_inferred": str(include_inferred).lower()},
-        )
+    def event_relationships(self, event_id: str, *, include_inferred: bool = False, include_expired: bool = False):
+        return self._get(f"/v1/events/{event_id}/relationships", {
+            "include_inferred": str(include_inferred).lower(),
+            "include_expired": str(include_expired).lower(),
+        })
 
     def entity(self, entity_id: str):
         return self._get(f"/v1/entities/{entity_id}")
 
     def entity_relationships(self, entity_id: str, *, include_inferred: bool = False):
-        return self._get(
-            f"/v1/entities/{entity_id}/relationships",
-            {"include_inferred": str(include_inferred).lower()},
-        )
+        return self._get(f"/v1/entities/{entity_id}/relationships", {
+            "include_inferred": str(include_inferred).lower(),
+        })
 
     def graph(self, node_id: str, *, include_inferred: bool = False, limit: int = 500):
-        return self._get(
-            f"/v1/graph/{node_id}",
-            {"include_inferred": str(include_inferred).lower(), "limit": limit},
-        )
+        return self._get(f"/v1/graph/{node_id}", {
+            "include_inferred": str(include_inferred).lower(),
+            "limit": limit,
+        })
 
     def changes(self, since: datetime | str, *, source_id: Optional[str] = None, limit: int = 1000):
         return self._get("/v1/changes", {
