@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from db import connect
 from institutional_archive_v2 import restore_payload
-from institutional_mapping import review_candidate
+from institutional_mapping_v3 import DIRECTIONS, RELATIONSHIP_TYPES, review_candidate
 
 router = APIRouter(tags=["institutional-ops"])
 
@@ -86,11 +86,7 @@ def get_contract(contract_id: str):
 
 @router.get("/internal/raw-snapshots/{raw_snapshot_id}", dependencies=[Depends(admin_auth)])
 def raw_snapshot_audit(raw_snapshot_id: str):
-    """Restore one exact source payload and independently verify its recorded SHA-256.
-
-    This is intentionally administrative rather than public: it exists for lineage review,
-    incident investigation and reproducibility without implying raw-source redistribution rights.
-    """
+    """Restore one exact source payload and independently verify its recorded SHA-256."""
     con = db_read()
     try:
         rows = rows_dict(con.execute(
@@ -190,7 +186,12 @@ def term_structure(family_id: str, as_of: Optional[datetime] = None):
                    ORDER BY resolution_deadline,canonical_event_id,source_id""",
                 [family_id, as_of, as_of, as_of],
             ))
-        return {"family": family[0], "as_of": as_of, "curve": rows}
+        return {
+            "family": family[0],
+            "as_of": as_of,
+            "curve": rows,
+            "note": "Term structure preserves source observations; no EventRisk consensus is imposed.",
+        }
     finally:
         con.close()
 
@@ -261,7 +262,9 @@ def graph_node(node_id: str, include_inferred: bool = False, limit: int = Query(
 
 
 class MappingReview(BaseModel):
-    action: str = Field(pattern="^(same_event|related_only|reject)$")
+    action: str = Field(pattern="^(same_event|relationship|related_only|reject)$")
+    relationship_type: Optional[str] = None
+    direction: str = Field(default="undirected", pattern="^(left_to_right|right_to_left|undirected)$")
     notes: Optional[str] = Field(default=None, max_length=4000)
     reviewer: str = Field(default="admin", min_length=1, max_length=200)
 
@@ -271,8 +274,11 @@ def mapping_candidates(status: str = "pending", limit: int = Query(250, ge=1, le
     con = db_read()
     try:
         return rows_dict(con.execute(
-            """SELECT mc.*,l.source_id left_source,l.current_title left_title,l.closes_at left_close,
-                      r.source_id right_source,r.current_title right_title,r.closes_at right_close
+            """SELECT mc.*,
+                      l.source_id left_source,l.current_title left_title,
+                      l.current_resolution_rules left_resolution_rules,l.closes_at left_close,
+                      r.source_id right_source,r.current_title right_title,
+                      r.current_resolution_rules right_resolution_rules,r.closes_at right_close
                FROM er_mapping_candidates mc
                JOIN er_source_contracts l ON l.source_contract_id=mc.left_source_contract_id
                JOIN er_source_contracts r ON r.source_contract_id=mc.right_source_contract_id
@@ -285,8 +291,25 @@ def mapping_candidates(status: str = "pending", limit: int = Query(250, ge=1, le
 
 @router.post("/internal/mapping-candidates/{candidate_id}/review", dependencies=[Depends(admin_auth)])
 def review_mapping(candidate_id: str, body: MappingReview):
+    relationship_type = body.relationship_type
+    if body.action == "related_only":
+        relationship_type = relationship_type or "related_to"
+    if body.action == "relationship":
+        if not relationship_type:
+            raise HTTPException(400, "relationship_type is required when action=relationship")
+        if relationship_type not in RELATIONSHIP_TYPES:
+            raise HTTPException(400, f"relationship_type must be one of {sorted(RELATIONSHIP_TYPES)}")
+    if body.direction not in DIRECTIONS:
+        raise HTTPException(400, f"direction must be one of {sorted(DIRECTIONS)}")
     try:
-        return review_candidate(candidate_id, body.action, body.reviewer, body.notes)
+        return review_candidate(
+            candidate_id,
+            body.action,
+            body.reviewer,
+            body.notes,
+            relationship_type=relationship_type,
+            direction=body.direction,
+        )
     except KeyError:
         raise HTTPException(404, "Mapping candidate not found")
     except ValueError as exc:
