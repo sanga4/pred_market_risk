@@ -10,10 +10,14 @@ def setup_database(tmp_path):
     root = Path(__file__).resolve().parents[1]
     con = db.connect()
     try:
-        con.execute((root / "institutional_schema.sql").read_text())
-        con.execute((root / "institutional_schema_002.sql").read_text())
-        con.execute((root / "institutional_schema_003.sql").read_text())
-        con.execute((root / "institutional_schema_004.sql").read_text())
+        for name in [
+            "institutional_schema.sql",
+            "institutional_schema_002.sql",
+            "institutional_schema_003.sql",
+            "institutional_schema_004.sql",
+            "institutional_schema_005.sql",
+        ]:
+            con.execute((root / name).read_text())
     finally:
         con.close()
     return db.DB
@@ -66,22 +70,12 @@ def persist_snapshot(con, snap, run_id="test-run"):
         [run_id + snap.source_id, snap.source_id],
     )
     event_raw = insert_raw(
-        con,
-        snap.source_id,
-        "event",
-        snap.source_event_id or snap.source_market_id,
-        snap.raw_event,
-        snap.observed_at,
-        run_id + snap.source_id,
+        con, snap.source_id, "event", snap.source_event_id or snap.source_market_id,
+        snap.raw_event, snap.observed_at, run_id + snap.source_id,
     )
     market_raw = insert_raw(
-        con,
-        snap.source_id,
-        "market",
-        snap.source_market_id,
-        snap.raw_market,
-        snap.observed_at,
-        run_id + snap.source_id,
+        con, snap.source_id, "market", snap.source_market_id,
+        snap.raw_market, snap.observed_at, run_id + snap.source_id,
     )
     contract_id = upsert_contract(con, snap, market_raw)
     link_contract_version_evidence(con, contract_id, event_raw, market_raw)
@@ -94,6 +88,7 @@ def test_raw_lineage_versioning_mapping_graph_and_qa(tmp_path):
     from datetime import datetime, timezone
     from institutional_graph import run_graph_pass
     from institutional_mapping_v2 import run_mapping_pass
+    from institutional_ontology import run_ontology_pass
     from institutional_qa import run_qa
 
     close = datetime(2027, 12, 31, tzinfo=timezone.utc)
@@ -104,7 +99,6 @@ def test_raw_lineage_versioning_mapping_graph_and_qa(tmp_path):
         left_id = persist_snapshot(con, left)
         right_id = persist_snapshot(con, right)
 
-        # A metadata change creates a new version rather than rewriting version 1.
         left_changed = snapshot("kalshi", "KX-TAIWAN", "Will China blockade Taiwan before 2028?", close)
         left_changed.description = "Updated source description"
         persist_snapshot(con, left_changed, "test-run-2")
@@ -116,23 +110,18 @@ def test_raw_lineage_versioning_mapping_graph_and_qa(tmp_path):
         assert versions[0][1] is not None
         assert versions[1][1] is None
 
-        # Every version has both event- and market-level source evidence.
         evidence = con.execute(
             """SELECT version_no,evidence_role,count(*)
                FROM er_contract_version_evidence
                WHERE source_contract_id=?
-               GROUP BY version_no,evidence_role
-               ORDER BY version_no,evidence_role""",
+               GROUP BY version_no,evidence_role""",
             [left_id],
         ).fetchall()
         assert set(evidence) == {
-            (1, "event_payload", 1),
-            (1, "market_payload", 1),
-            (2, "event_payload", 1),
-            (2, "market_payload", 1),
+            (1, "event_payload", 1), (1, "market_payload", 1),
+            (2, "event_payload", 1), (2, "market_payload", 1),
         }
 
-        # Every institutional observation is traceable to a raw market snapshot.
         missing = con.execute(
             """SELECT count(*) FROM er_market_observations o
                LEFT JOIN er_raw_snapshots r ON r.raw_snapshot_id=o.raw_snapshot_id
@@ -146,6 +135,9 @@ def test_raw_lineage_versioning_mapping_graph_and_qa(tmp_path):
     assert mapping["native_events_created"] >= 2
     assert mapping["auto_exact_mappings"] >= 1
 
+    ontology = run_ontology_pass()
+    assert ontology["events_normalized"] >= 1
+
     con = db.connect()
     try:
         mapped = con.execute(
@@ -154,6 +146,19 @@ def test_raw_lineage_versioning_mapping_graph_and_qa(tmp_path):
         ).fetchall()
         assert len(mapped) == 2
         assert len({r[0] for r in mapped}) == 1
+        event_id = mapped[0][0]
+        event_class = con.execute(
+            "SELECT event_class FROM er_canonical_events WHERE canonical_event_id=?", [event_id]
+        ).fetchone()[0]
+        assert event_class == "geopolitics"
+        event_versions = con.execute(
+            "SELECT version_no,event_class,valid_from,valid_to FROM er_canonical_event_versions WHERE canonical_event_id=? ORDER BY version_no",
+            [event_id],
+        ).fetchall()
+        assert len(event_versions) >= 2
+        assert event_versions[0][3] is not None
+        assert event_versions[-1][1] == "geopolitics"
+        assert event_versions[-1][3] is None
     finally:
         con.close()
 
