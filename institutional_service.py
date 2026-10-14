@@ -30,6 +30,10 @@ from institutional_ops_api import router as ops_router
 from institutional_qa import run_qa
 from institutional_stream import router as stream_router
 
+logging.basicConfig(
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 log = logging.getLogger("eventrisk.institutional_service")
 
 SCHEMA_FILES = [
@@ -77,6 +81,7 @@ def pipeline_cycle():
 async def collector_loop(stop: asyncio.Event):
     interval = max(300, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")))
     initial_delay = max(1, int(os.getenv("COLLECT_INITIAL_DELAY_SECONDS", "3")))
+    log.info("institutional collector enabled interval_seconds=%s initial_delay_seconds=%s", interval, initial_delay)
     await asyncio.sleep(initial_delay)
     while not stop.is_set():
         try:
@@ -95,7 +100,9 @@ async def lifespan(app: FastAPI):
     ensure_schema()
     stop = asyncio.Event()
     task = None
-    if os.getenv("ENABLE_BACKGROUND_COLLECTOR", "false").lower() in {"1", "true", "yes"}:
+    collector_enabled = os.getenv("ENABLE_BACKGROUND_COLLECTOR", "false").lower() in {"1", "true", "yes"}
+    log.info("institutional service startup schema_ready=true collector_enabled=%s", collector_enabled)
+    if collector_enabled:
         task = asyncio.create_task(collector_loop(stop))
     yield
     stop.set()
