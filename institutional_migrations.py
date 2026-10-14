@@ -20,6 +20,7 @@ MIGRATION_FILES = [
     "institutional_schema_010.sql",
     "institutional_schema_011.sql",
     "institutional_schema_012.sql",
+    "institutional_schema_013.sql",
 ]
 
 
@@ -88,6 +89,10 @@ def _migration_appears_applied(con, name: str) -> bool:
         )
     if name == "institutional_schema_012.sql":
         return _table_exists(con, "er_contract_semantic_versions") and _view_exists(con, "er_latest_contract_semantic_versions")
+    if name == "institutional_schema_013.sql":
+        return _table_exists(con, "er_methodology_registry") and bool(con.execute(
+            "SELECT count(*) FROM er_methodology_registry WHERE methodology_id='bulk_release' AND methodology_version='institutional_exports_v3'"
+        ).fetchone()[0])
     return False
 
 
