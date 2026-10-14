@@ -14,6 +14,7 @@ def setup_legacy_database(tmp_path):
         con.execute((root / "institutional_schema.sql").read_text())
         con.execute((root / "institutional_schema_002.sql").read_text())
         con.execute((root / "institutional_schema_003.sql").read_text())
+        con.execute((root / "institutional_schema_004.sql").read_text())
         con.execute("""CREATE TABLE ticks(
           ts TIMESTAMPTZ, venue VARCHAR, market_id VARCHAR, event_id VARCHAR,
           event_title VARCHAR, market_title VARCHAR, close_time TIMESTAMPTZ,
