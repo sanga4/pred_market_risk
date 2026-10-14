@@ -39,6 +39,7 @@ SCHEMA_FILES = [
     "institutional_schema_004.sql",
     "institutional_schema_005.sql",
     "institutional_schema_006.sql",
+    "institutional_schema_007.sql",
 ]
 
 
@@ -145,6 +146,9 @@ def health():
                 "er_canonical_events",
             ]:
                 counts[table] = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            counts["raw_database_bodies"] = con.execute(
+                "SELECT count(*) FROM er_raw_snapshots WHERE payload_json IS NOT NULL"
+            ).fetchone()[0]
             sources = con.execute(
                 "SELECT source_id,health_status,last_success_at,last_observation_at FROM er_source_health ORDER BY source_id"
             ).fetchall()
