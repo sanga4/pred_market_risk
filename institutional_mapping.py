@@ -78,14 +78,16 @@ def deadline_hours(a, b) -> Optional[float]:
 def bootstrap_native_events(con) -> int:
     contracts = con.execute(
         """SELECT c.source_contract_id,c.source_id,c.source_market_id,c.source_event_id,c.current_title,
-                  c.current_description,c.current_resolution_rules,c.closes_at,c.resolves_at,c.status
+                  c.current_description,c.current_resolution_rules,c.closes_at,c.resolves_at,c.status,
+                  c.first_seen_at
            FROM er_source_contracts c
            LEFT JOIN er_latest_contract_mappings m USING(source_contract_id)
            WHERE m.source_contract_id IS NULL"""
     ).fetchall()
     created = 0
     for row in contracts:
-        contract_id, source_id, source_market_id, source_event_id, title, description, rules, closes_at, resolves_at, status = row
+        (contract_id, source_id, source_market_id, source_event_id, title, description, rules,
+         closes_at, resolves_at, status, first_seen_at) = row
         fkey = family_key(title)
         family_id = stable_id("fam", fkey)
         event_id = stable_id("evt", source_id, source_market_id)
@@ -107,10 +109,10 @@ def bootstrap_native_events(con) -> int:
         con.execute(
             """INSERT INTO er_event_mappings(
                  mapping_id,source_contract_id,canonical_event_id,mapping_type,confidence,
-                 mapping_method,method_version,review_status,created_by)
-               VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(mapping_id) DO NOTHING""",
+                 mapping_method,method_version,review_status,valid_from,created_by)
+               VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(mapping_id) DO NOTHING""",
             [mapping_id, contract_id, event_id, "source_native", 1.0, "deterministic_identity",
-             METHOD_VERSION, "source_native", "system"],
+             METHOD_VERSION, "source_native", first_seen_at or now_utc(), "system"],
         )
         created += 1
     return created
