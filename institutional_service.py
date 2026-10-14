@@ -22,7 +22,7 @@ from institutional_auth import authenticate_key, extract_bearer
 from institutional_curve_api import router as curve_router
 from institutional_graph_v2 import run_graph_pass
 from institutional_history_api import router as history_router
-from institutional_ingest_v2 import run_once
+from institutional_ingest_v3 import run_once
 from institutional_mapping_v3 import run_mapping_pass
 from institutional_migrations import ensure_schema
 from institutional_ontology import run_ontology_pass
@@ -84,11 +84,7 @@ async def lifespan(app: FastAPI):
     stop = asyncio.Event()
     task = None
     collector_enabled = os.getenv("ENABLE_BACKGROUND_COLLECTOR", "false").lower() in {"1", "true", "yes"}
-    log.info(
-        "institutional service startup schema_ready=true migrations=%s collector_enabled=%s",
-        migration_state,
-        collector_enabled,
-    )
+    log.info("institutional service startup schema_ready=true migrations=%s collector_enabled=%s", migration_state, collector_enabled)
     if collector_enabled:
         task = asyncio.create_task(collector_loop(stop))
     yield
@@ -124,7 +120,7 @@ async def institutional_auth(request: Request, call_next):
             return JSONResponse({"detail": "Valid EventRisk API key required"}, status_code=401)
         request.state.eventrisk_client = client
     response = await call_next(request)
-    response.headers["X-EventRisk-Schema-Version"] = "v1.9"
+    response.headers["X-EventRisk-Schema-Version"] = "v2.0"
     response.headers["X-EventRisk-Data-Layer"] = "observed+normalized"
     return response
 
@@ -137,7 +133,7 @@ def health():
             counts = {}
             for table in [
                 "er_raw_snapshots", "er_raw_archive_objects", "er_source_contracts",
-                "er_market_observations", "er_canonical_events",
+                "er_contract_semantic_versions", "er_market_observations", "er_canonical_events",
             ]:
                 counts[table] = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
             counts["served_canonical_events"] = con.execute("SELECT count(*) FROM er_served_canonical_events").fetchone()[0]
