@@ -89,7 +89,7 @@ def _migration_appears_applied(con, name: str) -> bool:
             and _view_exists(con, "er_served_canonical_events")
         )
     if name == "institutional_schema_010.sql":
-        return bool(con.execute(
+        return _table_exists(con, "er_methodology_registry") and bool(con.execute(
             """SELECT count(*) FROM er_methodology_registry
                WHERE methodology_id='event_mapping' AND methodology_version='mapping_rules_v3_reviewable'"""
         ).fetchone()[0])
