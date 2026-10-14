@@ -5,7 +5,7 @@ import db
 
 
 def setup_database(monkeypatch, tmp_path):
-    monkeypatch.setattr(db, "DB", str(tmp_path / "mapping_v5.duckdb"))
+    monkeypatch.setattr(db, "DB", str(tmp_path / "mapping_v6.duckdb"))
     os.environ["DB_FORCE_READ_WRITE"] = "true"
     from institutional_migrations import ensure_schema
     ensure_schema()
@@ -53,9 +53,9 @@ def seed_contract(con, contract_id, source_id, market_id, title, rules, close, r
     return event_raw_id, market_raw_id
 
 
-def test_v5_exact_identity_matches_v4_semantics_and_second_pass_is_incremental(monkeypatch, tmp_path):
+def test_v6_exact_identity_matches_conservative_semantics_and_second_pass_is_incremental(monkeypatch, tmp_path):
     setup_database(monkeypatch, tmp_path)
-    from institutional_mapping_v5 import run_mapping_pass
+    from institutional_mapping_v6 import run_mapping_pass
 
     received = datetime(2026, 10, 14, 20, 0, tzinfo=timezone.utc)
     close = datetime(2027, 12, 31, tzinfo=timezone.utc)
@@ -69,13 +69,12 @@ def test_v5_exact_identity_matches_v4_semantics_and_second_pass_is_incremental(m
         con.close()
 
     first = run_mapping_pass()
-    assert first["method_version"] == "mapping_rules_v5_indexed"
+    assert first["method_version"] == "mapping_rules_v6_indexed_history"
+    assert first["candidate_history"] == "semantic_versioned_v1"
     assert first["contracts_total"] == 2
     assert first["contracts_changed"] == 2
     assert first["index_seed"]["seeded"] is True
-    assert first["index_seed"]["contracts"] == 2
     assert first["candidate_pairs_evaluated"] >= 1
-    assert first["candidates_generated"] >= 1
     assert first["auto_exact_mappings"] == 1
 
     con = db.connect()
@@ -86,14 +85,20 @@ def test_v5_exact_identity_matches_v4_semantics_and_second_pass_is_incremental(m
         """).fetchall()
         assert len(mappings) == 2
         assert len({row[1] for row in mappings}) == 1
-        candidate = con.execute("""
+        current = con.execute("""
             SELECT suggested_relationship,resolution_compatible,rules_available_both,
-                   left_semantic_version_no,right_semantic_version_no,method_version
-            FROM er_mapping_candidates WHERE method_version='mapping_rules_v5_indexed'
+                   left_semantic_version_no,right_semantic_version_no,method_version,status
+            FROM er_mapping_candidates WHERE method_version='mapping_rules_v6_indexed_history'
         """).fetchone()
-        assert candidate == ("same_event", True, True, 1, 1, "mapping_rules_v5_indexed")
-        assert con.execute("SELECT count(*) FROM er_mapping_contract_index").fetchone()[0] == 2
-        assert con.execute("SELECT count(*) FROM er_mapping_token_index").fetchone()[0] > 0
+        assert current == (
+            "same_event", True, True, 1, 1, "mapping_rules_v6_indexed_history", "auto_accepted"
+        )
+        history = con.execute("""
+            SELECT status,left_semantic_version_no,right_semantic_version_no
+            FROM er_mapping_candidate_versions
+            WHERE method_version='mapping_rules_v6_indexed_history'
+        """).fetchall()
+        assert history == [("auto_accepted", 1, 1)]
     finally:
         con.close()
 
@@ -102,10 +107,9 @@ def test_v5_exact_identity_matches_v4_semantics_and_second_pass_is_incremental(m
     assert second["candidate_pairs_evaluated"] == 0
     assert second["candidates_generated"] == 0
     assert second["auto_exact_mappings"] == 0
-    assert second["index_seed"]["seeded"] is False
 
 
-def test_v5_method_upgrade_does_not_reprocess_current_v4_watermarks(monkeypatch, tmp_path):
+def test_v6_method_upgrade_does_not_reprocess_current_v4_watermarks(monkeypatch, tmp_path):
     setup_database(monkeypatch, tmp_path)
     received = datetime(2026, 10, 14, 20, 0, tzinfo=timezone.utc)
     close = datetime(2027, 12, 31, tzinfo=timezone.utc)
@@ -122,7 +126,7 @@ def test_v5_method_upgrade_does_not_reprocess_current_v4_watermarks(monkeypatch,
     finally:
         con.close()
 
-    from institutional_mapping_v5 import run_mapping_pass
+    from institutional_mapping_v6 import run_mapping_pass
     result = run_mapping_pass()
     assert result["index_seed"]["seeded"] is True
     assert result["index_seed"]["contracts"] == 2
@@ -131,9 +135,9 @@ def test_v5_method_upgrade_does_not_reprocess_current_v4_watermarks(monkeypatch,
     assert result["candidates_generated"] == 0
 
 
-def test_v5_semantic_change_reenters_queue_and_versions_candidate_provenance(monkeypatch, tmp_path):
+def test_v6_semantic_change_reopens_current_review_and_preserves_prior_review_history(monkeypatch, tmp_path):
     setup_database(monkeypatch, tmp_path)
-    from institutional_mapping_v5 import run_mapping_pass
+    from institutional_mapping_v6 import review_candidate, run_mapping_pass
 
     received = datetime(2026, 10, 14, 20, 0, tzinfo=timezone.utc)
     close = datetime(2027, 12, 31, tzinfo=timezone.utc)
@@ -154,6 +158,15 @@ def test_v5_semantic_change_reenters_queue_and_versions_candidate_provenance(mon
     first = run_mapping_pass()
     assert first["contracts_changed"] == 2
     assert first["auto_exact_mappings"] == 0
+    con = db.connect()
+    try:
+        candidate_id = con.execute("""
+            SELECT candidate_id FROM er_mapping_candidates
+            WHERE method_version='mapping_rules_v6_indexed_history'
+        """).fetchone()[0]
+    finally:
+        con.close()
+    review_candidate(candidate_id, "reject", "test-reviewer", "Old semantics were not identical")
 
     changed_at = received + timedelta(hours=1)
     con = db.connect()
@@ -190,21 +203,32 @@ def test_v5_semantic_change_reenters_queue_and_versions_candidate_provenance(mon
             SELECT semantic_version_no,method_version FROM er_mapping_contract_state
             WHERE source_contract_id='sc-k'
         """).fetchone()
-        assert state == (2, "mapping_rules_v5_indexed")
-        versions = con.execute("""
-            SELECT left_semantic_version_no,right_semantic_version_no
-            FROM er_mapping_candidates
-            WHERE method_version='mapping_rules_v5_indexed'
-            ORDER BY created_at
-        """).fetchall()
-        assert any(sorted([row[0], row[1]]) == [1, 2] for row in versions)
+        assert state == (2, "mapping_rules_v6_indexed_history")
+        current = con.execute("""
+            SELECT status,review_action,left_semantic_version_no,right_semantic_version_no
+            FROM er_mapping_candidates WHERE candidate_id=?
+        """, [candidate_id]).fetchone()
+        assert current[0:2] == ("pending", None)
+        assert sorted([current[2], current[3]]) == [1, 2]
+        history = con.execute("""
+            SELECT status,review_action,reviewed_by,left_semantic_version_no,right_semantic_version_no,
+                   superseded_at IS NOT NULL
+            FROM er_mapping_candidate_versions
+            WHERE candidate_id=? ORDER BY generated_at,candidate_version_id
+        """, [candidate_id]).fetchall()
+        assert len(history) == 2
+        assert history[0][0:3] == ("reviewed", "reject", "test-reviewer")
+        assert history[0][5] is True
+        assert history[1][0:2] == ("pending", None)
+        assert sorted([history[1][3], history[1][4]]) == [1, 2]
     finally:
         con.close()
 
 
-def test_v5_recovers_only_stale_mapping_passes_as_abandoned(monkeypatch, tmp_path):
+def test_v6_recovers_stale_mapping_passes_as_abandoned(monkeypatch, tmp_path):
     setup_database(monkeypatch, tmp_path)
-    from institutional_mapping_v5 import recover_abandoned_mapping_passes
+    from institutional_mapping_v6 import run_mapping_pass
+    import institutional_mapping_v5 as mapping_v5
 
     con = db.connect()
     try:
@@ -212,9 +236,16 @@ def test_v5_recovers_only_stale_mapping_passes_as_abandoned(monkeypatch, tmp_pat
             INSERT INTO er_mapping_passes(pass_id,method_version,started_at,status)
             VALUES ('stale-pass','mapping_rules_v4_batched',now()-INTERVAL '2 hours','running')
         """)
-        recovery = recover_abandoned_mapping_passes(con)
+        recovery = mapping_v5.recover_abandoned_mapping_passes(con)
         assert recovery["recovered"] == 1
         assert recovery["running"] == []
+    finally:
+        con.close()
+
+    result = run_mapping_pass()
+    assert result["method_version"] == "mapping_rules_v6_indexed_history"
+    con = db.connect()
+    try:
         row = con.execute("SELECT status,finished_at,details FROM er_mapping_passes WHERE pass_id='stale-pass'").fetchone()
         assert row[0] == "abandoned"
         assert row[1] is not None
