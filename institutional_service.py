@@ -23,6 +23,7 @@ from institutional_curve_api import router as curve_router
 from institutional_graph_v2 import run_graph_pass
 from institutional_history_api import router as history_router
 from institutional_ingest_v3 import run_once
+from institutional_mapping_drift import persist_mapping_drift
 from institutional_mapping_v3 import run_mapping_pass
 from institutional_migrations import ensure_schema
 from institutional_ontology import run_ontology_pass
@@ -49,6 +50,7 @@ def pipeline_cycle():
     ontology = run_ontology_pass()
     graph = run_graph_pass()
     reference_versions = sync_reference_versions()
+    mapping_drift = persist_mapping_drift()
     qa = run_qa(stale_minutes=max(20, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")) // 60 * 4))
     return {
         "ingest": ingest,
@@ -57,6 +59,7 @@ def pipeline_cycle():
         "ontology": ontology,
         "graph": graph,
         "reference_versions": reference_versions,
+        "mapping_drift": mapping_drift,
         "qa": qa,
     }
 
