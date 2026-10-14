@@ -23,6 +23,6 @@ jobs:
           pip install -r requirements.txt pytest
       - name: Compile institutional modules
         run: |
-          python -m py_compile institutional_ingest.py institutional_ingest_v2.py institutional_archive.py institutional_mapping.py institutional_graph.py institutional_qa.py institutional_api.py institutional_ops_api.py institutional_service.py
+          python -m py_compile institutional_ingest.py institutional_ingest_v2.py institutional_archive.py institutional_mapping.py institutional_graph.py institutional_qa.py institutional_api.py institutional_ops_api.py institutional_service.py institutional_backfill.py
       - name: Run institutional tests
-        run: python -m pytest -q tests/test_institutional_pipeline.py
+        run: python -m pytest -q tests/test_institutional_pipeline.py tests/test_institutional_backfill.py
