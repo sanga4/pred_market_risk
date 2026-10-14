@@ -1,7 +1,7 @@
 """Standalone EventRisk institutional data service.
 
-This is intentionally separate from the retail FastAPI application.  In staging it can
-run the collector in-process against a local DuckDB volume.  In production the same
+This is intentionally separate from the retail FastAPI application. In staging it can
+run the collector in-process against a local DuckDB volume. In production the same
 collector code can be moved to a dedicated scheduled worker against MotherDuck.
 """
 
@@ -18,15 +18,20 @@ from fastapi.responses import JSONResponse
 
 from db import connect
 from institutional_api import router as data_router
-from institutional_ops_api import router as ops_router
+from institutional_archive import archive_pending
 from institutional_graph import run_graph_pass
 from institutional_ingest import run_once
 from institutional_mapping import run_mapping_pass
+from institutional_ops_api import router as ops_router
 from institutional_qa import run_qa
 
 log = logging.getLogger("eventrisk.institutional_service")
 
-SCHEMA_FILES = ["institutional_schema.sql", "institutional_schema_002.sql"]
+SCHEMA_FILES = [
+    "institutional_schema.sql",
+    "institutional_schema_002.sql",
+    "institutional_schema_003.sql",
+]
 
 
 def ensure_schema():
@@ -41,10 +46,11 @@ def ensure_schema():
 
 def pipeline_cycle():
     ingest = run_once()
+    archive = archive_pending(limit=int(os.getenv("RAW_ARCHIVE_BATCH_SIZE", "5000")))
     mapping = run_mapping_pass()
     graph = run_graph_pass()
     qa = run_qa(stale_minutes=max(20, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")) // 60 * 4))
-    return {"ingest": ingest, "mapping": mapping, "graph": graph, "qa": qa}
+    return {"ingest": ingest, "archive": archive, "mapping": mapping, "graph": graph, "qa": qa}
 
 
 async def collector_loop(stop: asyncio.Event):
@@ -109,7 +115,13 @@ def health():
         con = connect(read_only=True)
         try:
             counts = {}
-            for table in ["er_raw_snapshots", "er_source_contracts", "er_market_observations", "er_canonical_events"]:
+            for table in [
+                "er_raw_snapshots",
+                "er_raw_archive_objects",
+                "er_source_contracts",
+                "er_market_observations",
+                "er_canonical_events",
+            ]:
                 counts[table] = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
             sources = con.execute(
                 "SELECT source_id,health_status,last_success_at,last_observation_at FROM er_source_health ORDER BY source_id"
@@ -117,7 +129,14 @@ def health():
             critical = con.execute(
                 "SELECT count(*) FROM er_quality_issues WHERE status='open' AND severity='critical'"
             ).fetchone()[0]
-            return {"ok": critical == 0, "counts": counts, "sources": sources, "critical_quality_issues": critical}
+            unarchived = con.execute("SELECT count(*) FROM er_unarchived_raw_snapshots").fetchone()[0]
+            return {
+                "ok": critical == 0,
+                "counts": counts,
+                "sources": sources,
+                "critical_quality_issues": critical,
+                "unarchived_raw_snapshots": unarchived,
+            }
         finally:
             con.close()
     except Exception as exc:
