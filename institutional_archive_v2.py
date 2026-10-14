@@ -139,7 +139,7 @@ def archive_pending(max_rows: int = 20000, bundle_rows: int = 5000) -> dict:
                                  raw_snapshot_id,archive_provider,archive_bucket,archive_key,content_hash,
                                  byte_size,compression,status,error_message,archive_member,archive_bundle_hash,
                                  bundle_byte_size,ingestion_run_id)
-                               VALUES (?,?,?,?,?,?,?,'archived',NULL,?,?,?,?,?)
+                               VALUES (?,?,?,?,?,?,?,'archived',NULL,?,?,?,?)
                                ON CONFLICT(raw_snapshot_id) DO UPDATE SET
                                  archive_provider=excluded.archive_provider,
                                  archive_bucket=excluded.archive_bucket,
