@@ -5,9 +5,8 @@ returned by each source and leaves relevance decisions to institutional clients.
 Optional filtering exists only when explicitly configured with
 EVENTRISK_COLLECTION_SCOPE=filtered.
 
-Kalshi's public events endpoint is cursor paginated and does not require a category
-filter. Polymarket's keyset events endpoint likewise supports listing active events
-without a tag; tags are optional filters. The adapters preserve those source semantics.
+Pagination is fail-closed: repeated cursors and implausibly large page counts raise an
+error so a run cannot be labeled universe-complete after a malformed source traversal.
 """
 
 from __future__ import annotations
@@ -24,6 +23,8 @@ log = logging.getLogger("eventrisk.institutional_universe_adapters")
 COLLECTION_SCOPE = os.getenv("EVENTRISK_COLLECTION_SCOPE", "full").strip().lower()
 if COLLECTION_SCOPE not in {"full", "filtered"}:
     raise RuntimeError("EVENTRISK_COLLECTION_SCOPE must be 'full' or 'filtered'")
+
+MAX_SOURCE_PAGES = max(1, int(os.getenv("EVENTRISK_MAX_SOURCE_PAGES", "10000")))
 
 KALSHI_FILTER_CATEGORIES = {
     x.strip().lower()
@@ -44,8 +45,28 @@ def collection_policy() -> dict:
         "scope": COLLECTION_SCOPE,
         "kalshi_categories": sorted(KALSHI_FILTER_CATEGORIES) if COLLECTION_SCOPE == "filtered" else [],
         "polymarket_tags": list(POLY_FILTER_TAGS) if COLLECTION_SCOPE == "filtered" else [],
+        "max_source_pages": MAX_SOURCE_PAGES,
+        "pagination_guard": "repeated_cursor_or_page_cap_fails_run",
         "default_behavior": "all supported open events" if COLLECTION_SCOPE == "full" else "explicit source filters",
     }
+
+
+def _advance_cursor(source_id: str, next_cursor, seen_cursors: set[str], page_count: int):
+    if page_count > MAX_SOURCE_PAGES:
+        raise RuntimeError(
+            f"{source_id} pagination exceeded EVENTRISK_MAX_SOURCE_PAGES={MAX_SOURCE_PAGES}; "
+            "run cannot be considered universe-complete"
+        )
+    if not next_cursor:
+        return None
+    key = str(next_cursor)
+    if key in seen_cursors:
+        raise RuntimeError(
+            f"{source_id} returned repeated pagination cursor {key!r}; "
+            "run cannot be considered universe-complete"
+        )
+    seen_cursors.add(key)
+    return next_cursor
 
 
 class KalshiUniverseAdapter:
@@ -53,7 +74,12 @@ class KalshiUniverseAdapter:
 
     def iter_snapshots(self) -> Iterable[ContractSnapshot]:
         cursor = None
+        seen_cursors: set[str] = set()
+        page_count = 0
         while True:
+            page_count += 1
+            if page_count > MAX_SOURCE_PAGES:
+                _advance_cursor(self.source_id, None, seen_cursors, page_count)
             data = base.get_json(
                 f"{base.KALSHI}/events",
                 status="open",
@@ -144,8 +170,8 @@ class KalshiUniverseAdapter:
                         raw_event=event,
                         raw_market=market,
                     )
-            cursor = data.get("cursor")
-            if not cursor:
+            cursor = _advance_cursor(self.source_id, data.get("cursor"), seen_cursors, page_count)
+            if cursor is None:
                 break
 
 
@@ -187,15 +213,19 @@ class PolymarketUniverseAdapter:
         seen: set[str] = set()
         for tag in scopes:
             cursor = None
+            seen_cursors: set[str] = set()
+            page_count = 0
+            source_label = self.source_id if tag is None else f"{self.source_id}[tag={tag}]"
             while True:
+                page_count += 1
+                if page_count > MAX_SOURCE_PAGES:
+                    _advance_cursor(source_label, None, seen_cursors, page_count)
                 params = {
                     "closed": "false",
                     "limit": 100,
                     "after_cursor": cursor,
                 }
                 if tag is not None:
-                    # Retain the legacy slug filter only as an explicit filtered-mode
-                    # compatibility option. Full mode never supplies a tag restriction.
                     params["tag_slug"] = tag
                 data = base.get_json(f"{base.POLY_GAMMA}/events/keyset", **params)
                 for event in data.get("events") or []:
@@ -273,8 +303,8 @@ class PolymarketUniverseAdapter:
                             raw_event=event,
                             raw_market=market,
                         )
-                cursor = data.get("next_cursor")
-                if not cursor:
+                cursor = _advance_cursor(source_label, data.get("next_cursor"), seen_cursors, page_count)
+                if cursor is None:
                     break
 
 
