@@ -10,11 +10,11 @@ from typing import Optional
 
 import institutional_ingest_v2 as v2
 from db import connect
+from institutional_universe_adapters import ADAPTERS, collection_policy
 
 log = logging.getLogger("eventrisk.institutional_ingest_v3")
 
 ContractSnapshot = v2.ContractSnapshot
-ADAPTERS = v2.ADAPTERS
 ensure_sources = v2.ensure_sources
 insert_raw = v2.insert_raw
 upsert_contract = v2.upsert_contract
@@ -124,6 +124,7 @@ def ingest_source(source_id: str) -> dict:
     unique_events = 0
     semantic_versions = 0
     event_raw_ids: dict[str, str] = {}
+    policy = collection_policy()
     con = connect()
     try:
         ensure_sources(con)
@@ -173,6 +174,7 @@ def ingest_source(source_id: str) -> dict:
                 "unique_events": unique_events,
                 "semantic_versions_created": semantic_versions,
                 "contract_errors": errors,
+                "collection_policy": policy,
             })
             con.execute(
                 """UPDATE er_ingestion_runs
@@ -192,13 +194,21 @@ def ingest_source(source_id: str) -> dict:
                 "unique_events_written": unique_events,
                 "semantic_versions_created": semantic_versions,
                 "errors": errors,
+                "collection_policy": policy,
             }
         except Exception as exc:
             con.execute(
                 """UPDATE er_ingestion_runs
                    SET finished_at=?,status='failed',records_received=?,records_written=?,error_count=?,details=?
                    WHERE run_id=?""",
-                [now_utc(), written, written, errors + 1, str(exc)[:2000], run_id],
+                [
+                    now_utc(),
+                    written,
+                    written,
+                    errors + 1,
+                    json.dumps({"error": str(exc)[:1800], "collection_policy": policy}),
+                    run_id,
+                ],
             )
             update_health(con, source_id, run_id, "failed", written, str(exc)[:2000])
             raise
@@ -213,7 +223,12 @@ def run_once(source_ids: Optional[list[str]] = None) -> list[dict]:
             results.append(ingest_source(source_id))
         except Exception as exc:
             log.exception("Institutional ingestion failed for %s", source_id)
-            results.append({"source_id": source_id, "status": "failed", "error": str(exc)})
+            results.append({
+                "source_id": source_id,
+                "status": "failed",
+                "error": str(exc),
+                "collection_policy": collection_policy(),
+            })
     return results
 
 
