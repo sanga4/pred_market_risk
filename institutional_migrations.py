@@ -1,8 +1,4 @@
-"""Restart-safe schema migration runner for the institutional data plane.
-
-Institutional deployments never replay historical DDL on process restart. Applied
-migrations are checksum-locked; schema history advances only through new migrations.
-"""
+"""Restart-safe schema migration runner for the institutional data plane."""
 
 from __future__ import annotations
 
@@ -23,19 +19,16 @@ MIGRATION_FILES = [
     "institutional_schema_009.sql",
     "institutional_schema_010.sql",
     "institutional_schema_011.sql",
+    "institutional_schema_012.sql",
 ]
 
 
 def _table_exists(con, name: str) -> bool:
-    return bool(con.execute(
-        "SELECT count(*) FROM information_schema.tables WHERE table_name=?", [name]
-    ).fetchone()[0])
+    return bool(con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name=?", [name]).fetchone()[0])
 
 
 def _view_exists(con, name: str) -> bool:
-    return bool(con.execute(
-        "SELECT count(*) FROM information_schema.views WHERE table_name=?", [name]
-    ).fetchone()[0])
+    return bool(con.execute("SELECT count(*) FROM information_schema.views WHERE table_name=?", [name]).fetchone()[0])
 
 
 def _column_exists(con, relation: str, column: str) -> bool:
@@ -84,8 +77,7 @@ def _migration_appears_applied(con, name: str) -> bool:
         )
     if name == "institutional_schema_010.sql":
         return _table_exists(con, "er_methodology_registry") and bool(con.execute(
-            """SELECT count(*) FROM er_methodology_registry
-               WHERE methodology_id='event_mapping' AND methodology_version='mapping_rules_v3_reviewable'"""
+            "SELECT count(*) FROM er_methodology_registry WHERE methodology_id='event_mapping' AND methodology_version='mapping_rules_v3_reviewable'"
         ).fetchone()[0])
     if name == "institutional_schema_011.sql":
         return (
@@ -94,6 +86,8 @@ def _migration_appears_applied(con, name: str) -> bool:
             and _table_exists(con, "er_instrument_versions")
             and _view_exists(con, "er_latest_entity_versions")
         )
+    if name == "institutional_schema_012.sql":
+        return _table_exists(con, "er_contract_semantic_versions") and _view_exists(con, "er_latest_contract_semantic_versions")
     return False
 
 
@@ -115,8 +109,7 @@ def ensure_schema() -> dict:
               bootstrapped BOOLEAN NOT NULL DEFAULT FALSE
             )
         """)
-        existing_count = con.execute("SELECT count(*) FROM er_schema_migrations").fetchone()[0]
-        if existing_count == 0:
+        if con.execute("SELECT count(*) FROM er_schema_migrations").fetchone()[0] == 0:
             for name in MIGRATION_FILES:
                 sql = (root / name).read_text()
                 if _migration_appears_applied(con, name):
@@ -129,9 +122,7 @@ def ensure_schema() -> dict:
         for name in MIGRATION_FILES:
             sql = (root / name).read_text()
             checksum = _sha256(sql)
-            row = con.execute(
-                "SELECT content_sha256 FROM er_schema_migrations WHERE migration_name=?", [name]
-            ).fetchone()
+            row = con.execute("SELECT content_sha256 FROM er_schema_migrations WHERE migration_name=?", [name]).fetchone()
             if row is not None:
                 if row[0] != checksum:
                     raise RuntimeError(
@@ -151,7 +142,6 @@ def ensure_schema() -> dict:
                 con.execute("ROLLBACK")
                 raise
             applied_now.append(name)
-
         total = con.execute("SELECT count(*) FROM er_schema_migrations").fetchone()[0]
         return {"migration_count": int(total), "applied_now": applied_now, "bootstrapped": bootstrapped}
     finally:
