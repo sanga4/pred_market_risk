@@ -29,7 +29,6 @@ def main():
                 [source_id, source_name, source_type],
             )
 
-        # One source-contract row per legacy market, using the most recent stored title/deadline.
         con.execute(
             """
             INSERT INTO er_source_contracts(
@@ -58,8 +57,8 @@ def main():
             """
         )
 
-        # Create an explicit legacy metadata version for every migrated contract.  It has
-        # no raw_snapshot_id because those payloads genuinely were not preserved.
+        # Legacy metadata is versioned explicitly, but raw payload evidence stays NULL because
+        # the pre-institutional collector never stored those source responses.
         con.execute(
             """
             INSERT INTO er_source_contract_versions(
@@ -68,33 +67,19 @@ def main():
               source_observed_at, received_at, valid_from, valid_to, raw_snapshot_id
             )
             SELECT
-              c.source_contract_id,
-              1,
-              c.current_title,
-              c.current_description,
+              c.source_contract_id, 1, c.current_title, c.current_description,
               CASE WHEN c.active THEN 'active' ELSE 'legacy_inactive' END,
-              c.current_resolution_rules,
-              c.opens_at,
-              c.closes_at,
-              c.resolves_at,
-              c.last_seen_at,
-              c.last_seen_at,
-              c.first_seen_at,
-              NULL,
-              NULL
+              c.current_resolution_rules, c.opens_at, c.closes_at, c.resolves_at,
+              c.last_seen_at, c.last_seen_at, c.first_seen_at, NULL, NULL
             FROM er_source_contracts c
             WHERE c.source_id IN ('kalshi', 'polymarket')
             ON CONFLICT(source_contract_id, version_no) DO NOTHING
             """
         )
 
-        # Preserve the existing canonicalization as a legacy layer, without claiming it
-        # satisfies the new ontology or review requirements.
         con.execute(
             """
-            INSERT INTO er_event_families(
-              event_family_id, canonical_name, category, description
-            )
+            INSERT INTO er_event_families(event_family_id, canonical_name, category, description)
             SELECT DISTINCT
               'legacy_family:' || coalesce(theme, 'other'),
               'Legacy ' || coalesce(theme, 'other'),
@@ -131,16 +116,18 @@ def main():
             """
         )
 
+        # The imported mapping is made effective from the first historical observation,
+        # rather than the migration date, so `as_of` queries can reproduce the legacy feed.
         con.execute(
             """
             INSERT INTO er_event_mappings(
               mapping_id, source_contract_id, canonical_event_id,
               mapping_type, confidence, mapping_method, method_version,
-              review_status, review_notes, created_by
+              review_status, review_notes, valid_from, created_by
             )
             SELECT
               'legacy-map:' || em.venue || ':' || em.market_id || ':' || em.canonical_event_id,
-              'src:' || em.venue || ':' || em.market_id,
+              c.source_contract_id,
               em.canonical_event_id,
               'legacy_existing_mapping',
               NULL,
@@ -148,6 +135,7 @@ def main():
               'rules_v1',
               'legacy_unreviewed',
               'Imported from the existing event_markets table; requires review under institutional mapping policy.',
+              c.first_seen_at,
               'migration'
             FROM event_markets em
             JOIN er_source_contracts c
@@ -156,8 +144,6 @@ def main():
             """
         )
 
-        # Backfill the historical numerical observations we really have. Do not infer
-        # order-book depth, open interest, liquidity, or missing raw payload fields.
         con.execute(
             """
             INSERT INTO er_market_observations(
@@ -183,11 +169,7 @@ def main():
               prob,
               volume,
               volume_24h,
-              CASE
-                WHEN yes_bid IS NOT NULL AND yes_ask IS NOT NULL
-                THEN yes_ask - yes_bid
-                ELSE NULL
-              END,
+              CASE WHEN yes_bid IS NOT NULL AND yes_ask IS NOT NULL THEN yes_ask - yes_bid ELSE NULL END,
               'legacy_collector_v0.3'
             FROM ticks
             WHERE venue IN ('kalshi', 'polymarket')
