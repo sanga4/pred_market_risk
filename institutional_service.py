@@ -19,11 +19,13 @@ from fastapi.responses import JSONResponse
 from db import connect
 from institutional_api import router as data_router
 from institutional_archive import archive_pending
+from institutional_auth import authenticate_key, extract_bearer
 from institutional_graph import run_graph_pass
 from institutional_ingest_v2 import run_once
 from institutional_mapping_v2 import run_mapping_pass
 from institutional_ops_api import router as ops_router
 from institutional_qa import run_qa
+from institutional_stream import router as stream_router
 
 log = logging.getLogger("eventrisk.institutional_service")
 
@@ -100,13 +102,16 @@ app = FastAPI(
 
 
 @app.middleware("http")
-async def optional_api_key(request: Request, call_next):
-    expected = os.getenv("EVENTRISK_API_KEY")
-    if expected and request.url.path.startswith("/v1"):
-        auth = request.headers.get("authorization", "")
-        supplied = auth.split(" ", 1)[1] if auth.lower().startswith("bearer ") else request.headers.get("x-api-key")
-        if supplied != expected:
-            return JSONResponse({"detail": "Invalid API key"}, status_code=401)
+async def institutional_auth(request: Request, call_next):
+    require_auth = os.getenv("EVENTRISK_REQUIRE_AUTH", "false").lower() in {"1", "true", "yes"}
+    protected = request.url.path.startswith("/v1")
+    if protected and require_auth:
+        supplied = extract_bearer(request.headers.get("authorization"), request.headers.get("x-api-key"))
+        client = authenticate_key(supplied, "read")
+        if client is None:
+            return JSONResponse({"detail": "Valid EventRisk API key required"}, status_code=401)
+        request.state.eventrisk_client = client
+
     response = await call_next(request)
     response.headers["X-EventRisk-Schema-Version"] = "v1"
     response.headers["X-EventRisk-Data-Layer"] = "observed+normalized"
@@ -140,6 +145,8 @@ def health():
                 "sources": sources,
                 "critical_quality_issues": critical,
                 "unarchived_raw_snapshots": unarchived,
+                "auth_required": os.getenv("EVENTRISK_REQUIRE_AUTH", "false").lower() in {"1", "true", "yes"},
+                "collection_interval_seconds": max(300, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300"))),
             }
         finally:
             con.close()
@@ -154,9 +161,11 @@ def root():
         "version": "1.0.0-alpha",
         "docs": "/docs",
         "health": "/health",
+        "stream": "/v1/stream",
         "boundary": "EventRisk supplies observed and normalized event data; institutions own downstream scenarios and investment decisions.",
     }
 
 
 app.include_router(data_router)
 app.include_router(ops_router)
+app.include_router(stream_router)
