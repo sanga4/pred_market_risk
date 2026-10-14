@@ -26,7 +26,7 @@ jobs:
           python -m py_compile \
             institutional_ingest.py institutional_ingest_v2.py institutional_ingest_v3.py institutional_ingest_v4.py institutional_universe_adapters.py \
             institutional_archive.py institutional_archive_v2.py \
-            institutional_mapping.py institutional_mapping_v2.py institutional_mapping_v3.py institutional_mapping_drift.py \
+            institutional_mapping.py institutional_mapping_v2.py institutional_mapping_v3.py institutional_mapping_v4.py institutional_mapping_drift.py \
             institutional_ontology.py institutional_lifecycle.py institutional_graph.py institutional_graph_v2.py institutional_reference_versions.py \
             institutional_qa.py institutional_qa_v2.py institutional_qa_v3.py \
             institutional_readiness.py institutional_readiness_v2.py institutional_readiness_v3.py institutional_readiness_api.py \
