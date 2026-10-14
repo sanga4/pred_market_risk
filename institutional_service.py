@@ -22,6 +22,7 @@ from institutional_api import router as data_router
 from institutional_archive import archive_pending
 from institutional_auth import authenticate_key, extract_bearer
 from institutional_graph import run_graph_pass
+from institutional_history_api import router as history_router
 from institutional_ingest_v2 import run_once
 from institutional_mapping_v2 import run_mapping_pass
 from institutional_ontology import run_ontology_pass
@@ -37,6 +38,7 @@ SCHEMA_FILES = [
     "institutional_schema_003.sql",
     "institutional_schema_004.sql",
     "institutional_schema_005.sql",
+    "institutional_schema_006.sql",
 ]
 
 
@@ -180,5 +182,6 @@ def root():
 
 app.include_router(data_router)
 app.include_router(ops_router)
+app.include_router(history_router)
 app.include_router(admin_router)
 app.include_router(stream_router)
