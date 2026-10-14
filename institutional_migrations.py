@@ -29,6 +29,7 @@ MIGRATION_FILES = [
     "institutional_schema_019.sql",
     "institutional_schema_020.sql",
     "institutional_schema_021.sql",
+    "institutional_schema_022.sql",
 ]
 
 
@@ -145,6 +146,14 @@ def _migration_appears_applied(con, name: str) -> bool:
             and _column_exists(con, "er_mapping_candidates", "right_semantic_version_no")
             and _method_exists(con, "event_mapping", "mapping_rules_v5_indexed")
             and _method_exists(con, "mapping_pass_recovery", "mapping_pass_recovery_v1")
+        )
+    if name == "institutional_schema_022.sql":
+        return (
+            _table_exists(con, "er_ontology_runs")
+            and _table_exists(con, "er_ontology_event_state")
+            and _view_exists(con, "er_ontology_work_queue_v2")
+            and _method_exists(con, "event_ontology", "event_ontology_v2_batched")
+            and _method_exists(con, "ontology_run_recovery", "ontology_run_recovery_v1")
         )
     return False
 
