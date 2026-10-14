@@ -7,10 +7,16 @@ def text(name: str) -> str:
     return (ROOT / name).read_text()
 
 
-def test_all_runtime_migration_paths_include_latest_schema():
+def test_all_runtime_migration_paths_use_shared_ledger():
+    migration_runner = text("institutional_migrations.py")
+    assert '"institutional_schema_008.sql"' in migration_runner
+    assert "er_schema_migrations" in migration_runner
+
     for name in ["institutional_service.py", "institutional_worker.py", "migrate_institutional.py"]:
         body = text(name)
-        assert '"institutional_schema_008.sql"' in body, f"{name} must apply schema 008"
+        assert "from institutional_migrations import ensure_schema" in body, (
+            f"{name} must use the shared restart-safe migration ledger"
+        )
 
 
 def test_runtime_collectors_use_verified_bundle_archive():
