@@ -13,6 +13,7 @@ def setup_database(tmp_path):
         con.execute((root / "institutional_schema.sql").read_text())
         con.execute((root / "institutional_schema_002.sql").read_text())
         con.execute((root / "institutional_schema_003.sql").read_text())
+        con.execute((root / "institutional_schema_004.sql").read_text())
     finally:
         con.close()
     return db.DB
@@ -52,15 +53,39 @@ def snapshot(source, market_id, title, close, bid=0.2, ask=0.22, source_event_id
 
 
 def persist_snapshot(con, snap, run_id="test-run"):
-    from institutional_ingest_v2 import ensure_sources, insert_observation, insert_raw, upsert_contract
+    from institutional_ingest_v2 import (
+        ensure_sources,
+        insert_observation,
+        insert_raw,
+        link_contract_version_evidence,
+        upsert_contract,
+    )
     ensure_sources(con)
     con.execute(
         "INSERT INTO er_ingestion_runs(run_id,source_id,started_at,status) VALUES (?,?,now(),'running') ON CONFLICT(run_id) DO NOTHING",
         [run_id + snap.source_id, snap.source_id],
     )
-    raw_id = insert_raw(con, snap.source_id, "market", snap.source_market_id, snap.raw_market, snap.observed_at, run_id + snap.source_id)
-    contract_id = upsert_contract(con, snap, raw_id)
-    insert_observation(con, snap, contract_id, raw_id)
+    event_raw = insert_raw(
+        con,
+        snap.source_id,
+        "event",
+        snap.source_event_id or snap.source_market_id,
+        snap.raw_event,
+        snap.observed_at,
+        run_id + snap.source_id,
+    )
+    market_raw = insert_raw(
+        con,
+        snap.source_id,
+        "market",
+        snap.source_market_id,
+        snap.raw_market,
+        snap.observed_at,
+        run_id + snap.source_id,
+    )
+    contract_id = upsert_contract(con, snap, market_raw)
+    link_contract_version_evidence(con, contract_id, event_raw, market_raw)
+    insert_observation(con, snap, contract_id, market_raw)
     return contract_id
 
 
@@ -68,7 +93,7 @@ def test_raw_lineage_versioning_mapping_graph_and_qa(tmp_path):
     setup_database(tmp_path)
     from datetime import datetime, timezone
     from institutional_graph import run_graph_pass
-    from institutional_mapping import run_mapping_pass
+    from institutional_mapping_v2 import run_mapping_pass
     from institutional_qa import run_qa
 
     close = datetime(2027, 12, 31, tzinfo=timezone.utc)
@@ -91,7 +116,23 @@ def test_raw_lineage_versioning_mapping_graph_and_qa(tmp_path):
         assert versions[0][1] is not None
         assert versions[1][1] is None
 
-        # Every observation is traceable to a raw snapshot.
+        # Every version has both event- and market-level source evidence.
+        evidence = con.execute(
+            """SELECT version_no,evidence_role,count(*)
+               FROM er_contract_version_evidence
+               WHERE source_contract_id=?
+               GROUP BY version_no,evidence_role
+               ORDER BY version_no,evidence_role""",
+            [left_id],
+        ).fetchall()
+        assert set(evidence) == {
+            (1, "event_payload", 1),
+            (1, "market_payload", 1),
+            (2, "event_payload", 1),
+            (2, "market_payload", 1),
+        }
+
+        # Every institutional observation is traceable to a raw market snapshot.
         missing = con.execute(
             """SELECT count(*) FROM er_market_observations o
                LEFT JOIN er_raw_snapshots r ON r.raw_snapshot_id=o.raw_snapshot_id
@@ -135,7 +176,7 @@ def test_raw_lineage_versioning_mapping_graph_and_qa(tmp_path):
 def test_similar_but_not_identical_contracts_are_not_silently_merged(tmp_path):
     setup_database(tmp_path)
     from datetime import datetime, timezone
-    from institutional_mapping import run_mapping_pass
+    from institutional_mapping_v2 import run_mapping_pass
 
     con = db.connect()
     try:
@@ -191,8 +232,10 @@ def test_one_raw_event_per_event_per_pull(tmp_path, monkeypatch):
             "SELECT count(*) FROM er_raw_snapshots WHERE source_id='kalshi' AND source_object_type='market'"
         ).fetchone()[0]
         observations = con.execute("SELECT count(*) FROM er_market_observations").fetchone()[0]
+        evidence = con.execute("SELECT count(*) FROM er_contract_version_evidence").fetchone()[0]
         assert event_raw == 1
         assert market_raw == 2
         assert observations == 2
+        assert evidence == 4
     finally:
         con.close()
