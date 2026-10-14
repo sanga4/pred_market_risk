@@ -16,6 +16,7 @@ from institutional_migrations import ensure_schema
 from institutional_ontology import run_ontology_pass
 from institutional_qa_v3 import run_qa
 from institutional_reference_versions import sync_reference_versions
+from institutional_run_recovery import recover_abandoned_runs
 
 log = logging.getLogger("eventrisk.worker")
 
@@ -49,7 +50,8 @@ def cycle() -> dict:
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     migration_state = ensure_schema()
-    log.info("schema ready %s", migration_state)
+    recovery_state = recover_abandoned_runs()
+    log.info("schema ready %s run_recovery=%s", migration_state, recovery_state)
     interval = max(300, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")))
     once = os.getenv("RUN_ONCE", "false").lower() in {"1", "true", "yes"}
     while True:
