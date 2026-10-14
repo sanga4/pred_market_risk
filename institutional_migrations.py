@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Callable
 
 from db import connect
 
@@ -27,6 +26,7 @@ MIGRATION_FILES = [
     "institutional_schema_006.sql",
     "institutional_schema_007.sql",
     "institutional_schema_008.sql",
+    "institutional_schema_009.sql",
 ]
 
 
@@ -111,7 +111,6 @@ def _migration_appears_applied(con, name: str) -> bool:
             and _view_exists(con, "er_pending_mapping_review")
         )
     if name == "institutional_schema_007.sql":
-        # Do not require the view here. Migration 008 supersedes it and recreates it.
         return _column_exists(con, "er_raw_snapshots", "payload_storage") and _column_exists(
             con, "er_raw_snapshots", "payload_compacted_at"
         )
@@ -121,6 +120,14 @@ def _migration_appears_applied(con, name: str) -> bool:
             and _column_exists(con, "er_raw_archive_objects", "archive_bundle_hash")
             and _column_exists(con, "er_raw_archive_objects", "ingestion_run_id")
             and _column_exists(con, "er_raw_lineage_status", "archive_member")
+        )
+    if name == "institutional_schema_009.sql":
+        return (
+            _table_exists(con, "er_event_relationship_evidence")
+            and _column_exists(con, "er_data_releases", "manifest_hash")
+            and _column_exists(con, "er_mapping_candidates", "review_relationship_type")
+            and _view_exists(con, "er_event_curve_as_known")
+            and _view_exists(con, "er_served_canonical_events")
         )
     return False
 
