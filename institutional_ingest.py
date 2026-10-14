@@ -1,6 +1,6 @@
 """Full-fidelity institutional ingestion for EventRisk.
 
-This collector is deliberately separate from the retail `ticks` collector.  It stores:
+This collector is deliberately separate from the retail `ticks` collector. It stores:
 - immutable raw source payloads on every pull
 - versioned contract metadata
 - point-in-time market observations
@@ -368,9 +368,10 @@ def upsert_contract(con, snapshot: ContractSnapshot, raw_snapshot_id: str) -> st
                 "SELECT coalesce(max(version_no),0) FROM er_source_contract_versions WHERE source_contract_id=?",
                 [contract_id],
             ).fetchone()[0]
+            changed_at = now_utc()
             con.execute(
                 "UPDATE er_source_contract_versions SET valid_to=? WHERE source_contract_id=? AND valid_to IS NULL",
-                [now_utc(), contract_id],
+                [changed_at, contract_id],
             )
             con.execute(
                 """INSERT INTO er_source_contract_versions(
@@ -379,13 +380,15 @@ def upsert_contract(con, snapshot: ContractSnapshot, raw_snapshot_id: str) -> st
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 [contract_id, prior + 1, snapshot.title, snapshot.description, snapshot.status,
                  snapshot.resolution_rules, snapshot.opens_at, snapshot.closes_at, snapshot.resolves_at,
-                 snapshot.observed_at, now_utc(), now_utc(), raw_snapshot_id],
+                 snapshot.observed_at, changed_at, changed_at, raw_snapshot_id],
             )
             con.execute(
-                """INSERT INTO er_revisions(revision_id,object_type,object_id,revision_type,reason,previous_version,new_version,effective_at)
-                   VALUES (?,?,?,?,?,?,?,?,?)""".replace(",?,?,?,?,?)", ",?,?,?,?)"),
+                """INSERT INTO er_revisions(
+                     revision_id,object_type,object_id,revision_type,reason,
+                     previous_version,new_version,effective_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
                 [f"rev_{uuid.uuid4().hex}", "source_contract", contract_id, "metadata_change",
-                 "Source contract metadata changed", str(prior), str(prior + 1), snapshot.observed_at],
+                 "Source contract metadata changed", str(prior), str(prior + 1), changed_at],
             )
     return contract_id
 
@@ -438,69 +441,3 @@ def update_health(con, source_id: str, run_id: str, status: str, records: int, d
         [source_id, now_utc(), now_utc() if status == "success" else None, last_obs, run_id, status,
          records, failures, "healthy" if status == "success" else "degraded", details],
     )
-
-
-def ingest_source(source_id: str) -> dict:
-    if source_id not in ADAPTERS:
-        raise ValueError(f"Unknown source {source_id}")
-    adapter = ADAPTERS[source_id]()
-    run_id = f"ing_{uuid.uuid4().hex}"
-    started = now_utc()
-    written = 0
-    errors = 0
-    con = connect()
-    try:
-        ensure_sources(con)
-        con.execute(
-            "INSERT INTO er_ingestion_runs(run_id,source_id,started_at,status) VALUES (?,?,?,'running')",
-            [run_id, source_id, started],
-        )
-        try:
-            for snapshot in adapter.iter_snapshots():
-                try:
-                    event_object_id = snapshot.source_event_id or snapshot.source_market_id
-                    insert_raw(con, source_id, "event", event_object_id, snapshot.raw_event, snapshot.observed_at, run_id)
-                    market_raw_id = insert_raw(
-                        con, source_id, "market", snapshot.source_market_id,
-                        snapshot.raw_market, snapshot.observed_at, run_id,
-                    )
-                    contract_id = upsert_contract(con, snapshot, market_raw_id)
-                    insert_observation(con, snapshot, contract_id, market_raw_id)
-                    written += 1
-                except Exception:
-                    errors += 1
-                    log.exception("Failed to persist %s contract %s", source_id, snapshot.source_market_id)
-            status = "success" if errors == 0 else "partial"
-            con.execute(
-                """UPDATE er_ingestion_runs SET finished_at=?,status=?,records_received=?,records_written=?,error_count=?
-                   WHERE run_id=?""",
-                [now_utc(), status, written + errors, written, errors, run_id],
-            )
-            update_health(con, source_id, run_id, status, written, None if not errors else f"{errors} record errors")
-            return {"source_id": source_id, "run_id": run_id, "status": status, "records_written": written, "errors": errors}
-        except Exception as exc:
-            con.execute(
-                """UPDATE er_ingestion_runs SET finished_at=?,status='failed',records_received=?,records_written=?,error_count=?,details=?
-                   WHERE run_id=?""",
-                [now_utc(), written, written, errors + 1, str(exc)[:2000], run_id],
-            )
-            update_health(con, source_id, run_id, "failed", written, str(exc)[:2000])
-            raise
-    finally:
-        con.close()
-
-
-def run_once(source_ids: Optional[list[str]] = None) -> list[dict]:
-    results = []
-    for source_id in source_ids or list(ADAPTERS):
-        try:
-            results.append(ingest_source(source_id))
-        except Exception as exc:
-            log.exception("Institutional ingestion failed for %s", source_id)
-            results.append({"source_id": source_id, "status": "failed", "error": str(exc)})
-    return results
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    print(json.dumps(run_once(), indent=2, default=str))
