@@ -19,7 +19,7 @@ from pathlib import Path
 import boto3
 
 from db import connect
-from institutional_readiness import evaluate_readiness
+from institutional_readiness_v2 import evaluate_readiness
 
 SCHEMA_VERSION = "v1.7"
 MAPPING_VERSION = "mapping_rules_v3_reviewable"
