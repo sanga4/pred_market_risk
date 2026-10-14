@@ -9,7 +9,7 @@ def text(name: str) -> str:
 
 def test_all_runtime_migration_paths_use_shared_ledger():
     migration_runner = text("institutional_migrations.py")
-    assert '"institutional_schema_019.sql"' in migration_runner
+    assert '"institutional_schema_020.sql"' in migration_runner
     assert "er_schema_migrations" in migration_runner
 
     for name in ["institutional_service.py", "institutional_worker.py", "migrate_institutional.py"]:
@@ -19,11 +19,11 @@ def test_all_runtime_migration_paths_use_shared_ledger():
         )
 
 
-def test_runtime_collectors_use_verified_archive_parallel_ingest_and_incremental_mapping():
+def test_runtime_collectors_use_verified_archive_cdc_ingest_and_incremental_mapping():
     for name in ["institutional_service.py", "institutional_worker.py"]:
         body = text(name)
         assert "from institutional_archive_v2 import archive_pending" in body
-        assert "from institutional_ingest_v5 import run_once" in body
+        assert "from institutional_ingest_v6 import run_once" in body
         assert "from institutional_mapping_v4 import run_mapping_pass" in body
         assert "from institutional_mapping_drift import persist_mapping_drift" in body
         assert "from institutional_lifecycle import sync_event_lifecycle" in body
@@ -45,7 +45,7 @@ def test_service_exposes_curves_readiness_and_lossless_changefeed():
     assert "institutional_curve_api" in body
     assert "institutional_changefeed_api" in body
     assert "institutional_readiness_api" in body
-    assert 'X-EventRisk-Schema-Version"] = "v2.4"' in body
+    assert 'X-EventRisk-Schema-Version"] = "v2.5"' in body
     assert "app.include_router(curve_router)" in body
     assert "app.include_router(changefeed_router)" in body
     assert "app.include_router(readiness_router)" in body
@@ -100,6 +100,10 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
 
     schema19 = text("institutional_schema_019.sql")
     assert "parallel_fetch_serial_write_v5" in schema19
+
+    schema20 = text("institutional_schema_020.sql")
+    for value in ["change_data_capture_v6", "state_change_points_v1"]:
+        assert value in schema20
 
 
 def test_raw_bundle_schema_exists():
