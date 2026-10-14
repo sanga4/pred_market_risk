@@ -2,7 +2,7 @@
 
 This is intentionally separate from the retail FastAPI application. In staging it can
 run the collector in-process against a local DuckDB volume. In production the same
-collector code can be moved to a dedicated scheduled worker against MotherDuck.
+collector code can move to a dedicated worker against a shared analytical store.
 """
 
 from __future__ import annotations
@@ -20,14 +20,16 @@ from institutional_admin_api import router as admin_router
 from institutional_api import router as data_router
 from institutional_archive_v2 import archive_pending
 from institutional_auth import authenticate_key, extract_bearer
+from institutional_curve_api import router as curve_router
 from institutional_graph import run_graph_pass
 from institutional_history_api import router as history_router
 from institutional_ingest_v2 import run_once
-from institutional_mapping_v2 import run_mapping_pass
+from institutional_mapping_v3 import run_mapping_pass
 from institutional_migrations import ensure_schema
 from institutional_ontology import run_ontology_pass
 from institutional_ops_api import router as ops_router
-from institutional_qa import run_qa
+from institutional_qa_v2 import run_qa
+from institutional_readiness_api import router as readiness_router
 from institutional_stream import router as stream_router
 
 logging.basicConfig(
@@ -121,7 +123,7 @@ async def institutional_auth(request: Request, call_next):
         request.state.eventrisk_client = client
 
     response = await call_next(request)
-    response.headers["X-EventRisk-Schema-Version"] = "v1"
+    response.headers["X-EventRisk-Schema-Version"] = "v1.7"
     response.headers["X-EventRisk-Data-Layer"] = "observed+normalized"
     return response
 
@@ -140,6 +142,9 @@ def health():
                 "er_canonical_events",
             ]:
                 counts[table] = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            counts["served_canonical_events"] = con.execute(
+                "SELECT count(*) FROM er_served_canonical_events"
+            ).fetchone()[0]
             counts["raw_database_bodies"] = con.execute(
                 "SELECT count(*) FROM er_raw_snapshots WHERE payload_json IS NOT NULL"
             ).fetchone()[0]
@@ -164,6 +169,7 @@ def health():
                 "unarchived_raw_snapshots": unarchived,
                 "auth_required": os.getenv("EVENTRISK_REQUIRE_AUTH", "false").lower() in {"1", "true", "yes"},
                 "collection_interval_seconds": max(300, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300"))),
+                "readiness": "/v1/readiness",
             }
         finally:
             con.close()
@@ -178,6 +184,7 @@ def root():
         "version": "1.0.0-alpha",
         "docs": "/docs",
         "health": "/health",
+        "readiness": "/v1/readiness",
         "stream": "/v1/stream",
         "bulk_releases": "/v1/releases",
         "boundary": "EventRisk supplies observed and normalized event data; institutions own downstream scenarios and investment decisions.",
@@ -185,7 +192,9 @@ def root():
 
 
 app.include_router(data_router)
+app.include_router(curve_router)
 app.include_router(ops_router)
 app.include_router(history_router)
+app.include_router(readiness_router)
 app.include_router(admin_router)
 app.include_router(stream_router)
