@@ -12,18 +12,19 @@ def setup_database(tmp_path):
     try:
         con.execute((root / "institutional_schema.sql").read_text())
         con.execute((root / "institutional_schema_002.sql").read_text())
+        con.execute((root / "institutional_schema_003.sql").read_text())
     finally:
         con.close()
     return db.DB
 
 
-def snapshot(source, market_id, title, close, bid=0.2, ask=0.22):
-    from institutional_ingest import ContractSnapshot
+def snapshot(source, market_id, title, close, bid=0.2, ask=0.22, source_event_id=None):
+    from institutional_ingest_v2 import ContractSnapshot
     from datetime import datetime, timezone
     return ContractSnapshot(
         source_id=source,
         source_market_id=market_id,
-        source_event_id=f"event-{market_id}",
+        source_event_id=source_event_id or f"event-{market_id}",
         title=title,
         description=f"Description for {title}",
         status="active",
@@ -45,13 +46,13 @@ def snapshot(source, market_id, title, close, bid=0.2, ask=0.22):
         open_interest=500.0,
         liquidity=200.0,
         orderbook_depth=None,
-        raw_event={"id": f"event-{market_id}", "title": title},
+        raw_event={"id": source_event_id or f"event-{market_id}", "title": title},
         raw_market={"id": market_id, "question": title, "bestBid": bid, "bestAsk": ask},
     )
 
 
 def persist_snapshot(con, snap, run_id="test-run"):
-    from institutional_ingest import ensure_sources, insert_observation, insert_raw, upsert_contract
+    from institutional_ingest_v2 import ensure_sources, insert_observation, insert_raw, upsert_contract
     ensure_sources(con)
     con.execute(
         "INSERT INTO er_ingestion_runs(run_id,source_id,started_at,status) VALUES (?,?,now(),'running') ON CONFLICT(run_id) DO NOTHING",
@@ -155,5 +156,43 @@ def test_similar_but_not_identical_contracts_are_not_silently_merged(tmp_path):
         assert len({m[1] for m in mappings}) == 2
         pending = con.execute("SELECT count(*) FROM er_mapping_candidates WHERE status='pending'").fetchone()[0]
         assert pending >= 1
+    finally:
+        con.close()
+
+
+def test_one_raw_event_per_event_per_pull(tmp_path, monkeypatch):
+    setup_database(tmp_path)
+    from datetime import datetime, timezone
+    import institutional_ingest_v2 as ingest
+
+    close = datetime(2027, 12, 31, tzinfo=timezone.utc)
+    shared_event = "shared-event-1"
+    rows = [
+        snapshot("kalshi", "MKT-A", "Outcome A of shared event", close, source_event_id=shared_event),
+        snapshot("kalshi", "MKT-B", "Outcome B of shared event", close, source_event_id=shared_event),
+    ]
+
+    class FakeAdapter:
+        def iter_snapshots(self):
+            yield from rows
+
+    monkeypatch.setitem(ingest.ADAPTERS, "kalshi", FakeAdapter)
+    result = ingest.ingest_source("kalshi")
+    assert result["records_written"] == 2
+    assert result["unique_events_written"] == 1
+    assert result["errors"] == 0
+
+    con = db.connect()
+    try:
+        event_raw = con.execute(
+            "SELECT count(*) FROM er_raw_snapshots WHERE source_id='kalshi' AND source_object_type='event'"
+        ).fetchone()[0]
+        market_raw = con.execute(
+            "SELECT count(*) FROM er_raw_snapshots WHERE source_id='kalshi' AND source_object_type='market'"
+        ).fetchone()[0]
+        observations = con.execute("SELECT count(*) FROM er_market_observations").fetchone()[0]
+        assert event_raw == 1
+        assert market_raw == 2
+        assert observations == 2
     finally:
         con.close()
