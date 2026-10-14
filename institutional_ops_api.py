@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from db import connect
 from institutional_archive_v2 import restore_payload
-from institutional_mapping_v3 import DIRECTIONS, RELATIONSHIP_TYPES, review_candidate
+from institutional_mapping_v4 import DIRECTIONS, RELATIONSHIP_TYPES, review_candidate
 
 router = APIRouter(tags=["institutional-ops"])
 
