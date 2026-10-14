@@ -29,7 +29,7 @@ from institutional_mapping_v3 import run_mapping_pass
 from institutional_migrations import ensure_schema
 from institutional_ontology import run_ontology_pass
 from institutional_ops_api import router as ops_router
-from institutional_qa_v2 import run_qa
+from institutional_qa_v3 import run_qa
 from institutional_readiness_api import router as readiness_router
 from institutional_reference_versions import sync_reference_versions
 from institutional_stream import router as stream_router
@@ -126,7 +126,7 @@ async def institutional_auth(request: Request, call_next):
             return JSONResponse({"detail": "Valid EventRisk API key required"}, status_code=401)
         request.state.eventrisk_client = client
     response = await call_next(request)
-    response.headers["X-EventRisk-Schema-Version"] = "v2.0"
+    response.headers["X-EventRisk-Schema-Version"] = "v2.1"
     response.headers["X-EventRisk-Data-Layer"] = "observed+normalized"
     return response
 
