@@ -110,5 +110,7 @@ def test_filtered_scope_is_explicit_not_default(monkeypatch):
         "scope": "filtered",
         "kalshi_categories": ["politics"],
         "polymarket_tags": ["geopolitics", "economy"],
+        "max_source_pages": adapters.MAX_SOURCE_PAGES,
+        "pagination_guard": "repeated_cursor_or_page_cap_fails_run",
         "default_behavior": "explicit source filters",
     }
