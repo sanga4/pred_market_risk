@@ -9,7 +9,7 @@ def text(name: str) -> str:
 
 def test_all_runtime_migration_paths_use_shared_ledger():
     migration_runner = text("institutional_migrations.py")
-    assert '"institutional_schema_013.sql"' in migration_runner
+    assert '"institutional_schema_016.sql"' in migration_runner
     assert "er_schema_migrations" in migration_runner
 
     for name in ["institutional_service.py", "institutional_worker.py", "migrate_institutional.py"]:
@@ -19,25 +19,28 @@ def test_all_runtime_migration_paths_use_shared_ledger():
         )
 
 
-def test_runtime_collectors_use_verified_archive_full_semantics_and_versioned_graph():
+def test_runtime_collectors_use_verified_archive_batch_ingest_and_versioned_graph():
     for name in ["institutional_service.py", "institutional_worker.py"]:
         body = text(name)
         assert "from institutional_archive_v2 import archive_pending" in body
-        assert "from institutional_ingest_v3 import run_once" in body
+        assert "from institutional_ingest_v4 import run_once" in body
         assert "from institutional_mapping_v3 import run_mapping_pass" in body
         assert "from institutional_mapping_drift import persist_mapping_drift" in body
+        assert "from institutional_lifecycle import sync_event_lifecycle" in body
         assert "from institutional_graph_v2 import run_graph_pass" in body
         assert "from institutional_reference_versions import sync_reference_versions" in body
-        assert "from institutional_qa_v2 import run_qa" in body
+        assert "from institutional_qa_v3 import run_qa" in body
         assert "RAW_ARCHIVE_MAX_ROWS" in body
         assert "RAW_ARCHIVE_BATCH_SIZE" in body
 
 
-def test_service_exposes_curves_and_readiness():
+def test_service_exposes_curves_readiness_and_lossless_changefeed():
     body = text("institutional_service.py")
     assert "institutional_curve_api" in body
+    assert "institutional_changefeed_api" in body
     assert "institutional_readiness_api" in body
     assert "app.include_router(curve_router)" in body
+    assert "app.include_router(changefeed_router)" in body
     assert "app.include_router(readiness_router)" in body
 
 
@@ -53,14 +56,11 @@ def test_admin_release_path_uses_v3_point_in_time_generator():
     assert "later closure fields masked" in body
 
 
-def test_latest_schema_contains_point_in_time_and_semantic_provenance():
+def test_latest_schema_contains_point_in_time_semantic_and_presence_provenance():
     schema9 = text("institutional_schema_009.sql")
     for value in [
-        "er_event_curve_as_known",
-        "er_event_curve_current_taxonomy",
-        "er_served_canonical_events",
-        "er_event_relationship_evidence",
-        "manifest_hash",
+        "er_event_curve_as_known", "er_event_curve_current_taxonomy", "er_served_canonical_events",
+        "er_event_relationship_evidence", "manifest_hash",
     ]:
         assert value in schema9
 
@@ -70,12 +70,19 @@ def test_latest_schema_contains_point_in_time_and_semantic_provenance():
 
     schema12 = text("institutional_schema_012.sql")
     for value in [
-        "er_contract_semantic_versions",
-        "event_raw_snapshot_id",
-        "market_raw_snapshot_id",
-        "metadata_completeness",
+        "er_contract_semantic_versions", "event_raw_snapshot_id", "market_raw_snapshot_id", "metadata_completeness",
     ]:
         assert value in schema12
+
+    schema14 = text("institutional_schema_014.sql")
+    for value in [
+        "er_contract_presence_state", "er_contract_presence_transitions", "universe_complete", "collection_scope",
+    ]:
+        assert value in schema14
+
+    schema16 = text("institutional_schema_016.sql")
+    for value in ["set_based_ingest_v4", "compound_cursor_v2_1", "compound_cursor_changefeed_v1"]:
+        assert value in schema16
 
 
 def test_raw_bundle_schema_exists():
