@@ -38,7 +38,6 @@ MIN_TITLE_SIMILARITY = 0.72
 INDEX_BATCH_ROWS = max(1000, int(os.getenv("MAPPING_INDEX_BATCH_ROWS", "20000")))
 RECOVERY_MINUTES = max(10, int(os.getenv("MAPPING_RUN_RECOVERY_MINUTES", "30")))
 
-# Inherited review and exact-merge helpers must stamp the active method version.
 base.METHOD_VERSION = METHOD_VERSION
 v2.METHOD_VERSION = METHOD_VERSION
 v3.METHOD_VERSION = METHOD_VERSION
@@ -46,7 +45,6 @@ v4.METHOD_VERSION = METHOD_VERSION
 RELATIONSHIP_TYPES = v3.RELATIONSHIP_TYPES
 DIRECTIONS = v3.DIRECTIONS
 review_candidate = v3.review_candidate
-
 
 INDEX_SCHEMA = pa.schema([
     ("source_contract_id", pa.string()),
@@ -186,23 +184,21 @@ def _seed_index_if_needed(con) -> dict:
     if existing:
         return {"seeded": False, "contracts": 0, "tokens": 0, "existing": existing}
 
-    cur = con.execute("""
+    # DuckDB's connection is also the active result cursor. Materialize the one-time seed
+    # result before issuing batched writes on the same connection; steady-state passes never
+    # load the full universe because the work queue is semantic-version incremental.
+    rows = _rows_dict(con.execute("""
         SELECT c.source_contract_id,c.source_id,c.current_title,c.current_resolution_rules,
                c.closes_at,c.resolves_at,s.version_no AS semantic_version_no
         FROM er_source_contracts c
         LEFT JOIN er_latest_contract_semantic_versions s USING(source_contract_id)
         WHERE c.active=TRUE
         ORDER BY c.source_id,c.source_contract_id
-    """)
-    cols = [d[0] for d in cur.description]
+    """))
     total_contracts = 0
     total_tokens = 0
-    while True:
-        batch = cur.fetchmany(INDEX_BATCH_ROWS)
-        if not batch:
-            break
-        rows = [dict(zip(cols, row)) for row in batch]
-        result = _upsert_index_batch(con, rows)
+    for start in range(0, len(rows), INDEX_BATCH_ROWS):
+        result = _upsert_index_batch(con, rows[start:start + INDEX_BATCH_ROWS])
         total_contracts += result["contracts"]
         total_tokens += result["tokens"]
     return {"seeded": True, "contracts": total_contracts, "tokens": total_tokens, "existing": 0}
