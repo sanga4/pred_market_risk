@@ -28,6 +28,7 @@ MIGRATION_FILES = [
     "institutional_schema_018.sql",
     "institutional_schema_019.sql",
     "institutional_schema_020.sql",
+    "institutional_schema_021.sql",
 ]
 
 
@@ -134,6 +135,16 @@ def _migration_appears_applied(con, name: str) -> bool:
     if name == "institutional_schema_020.sql":
         return _method_exists(con, "source_ingestion", "change_data_capture_v6") and _method_exists(
             con, "observation_sampling", "state_change_points_v1"
+        )
+    if name == "institutional_schema_021.sql":
+        return (
+            _table_exists(con, "er_mapping_contract_index")
+            and _table_exists(con, "er_mapping_token_index")
+            and _view_exists(con, "er_mapping_work_queue_v5")
+            and _column_exists(con, "er_mapping_candidates", "left_semantic_version_no")
+            and _column_exists(con, "er_mapping_candidates", "right_semantic_version_no")
+            and _method_exists(con, "event_mapping", "mapping_rules_v5_indexed")
+            and _method_exists(con, "mapping_pass_recovery", "mapping_pass_recovery_v1")
         )
     return False
 
