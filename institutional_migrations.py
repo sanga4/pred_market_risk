@@ -31,6 +31,8 @@ MIGRATION_FILES = [
     "institutional_schema_021.sql",
     "institutional_schema_022.sql",
     "institutional_schema_023.sql",
+    "institutional_schema_024.sql",
+    "institutional_schema_025.sql",
 ]
 
 
@@ -161,6 +163,20 @@ def _migration_appears_applied(con, name: str) -> bool:
             _table_exists(con, "er_mapping_candidate_versions")
             and _view_exists(con, "er_latest_mapping_candidate_versions")
             and _method_exists(con, "mapping_candidate_history", "mapping_candidate_versions_v1")
+        )
+    if name == "institutional_schema_024.sql":
+        return _method_exists(con, "event_mapping", "mapping_rules_v6_indexed_history")
+    if name == "institutional_schema_025.sql":
+        return (
+            _table_exists(con, "er_graph_runs")
+            and _table_exists(con, "er_graph_interval_state")
+            and _table_exists(con, "er_graph_edge_origins")
+            and _table_exists(con, "er_graph_state")
+            and _view_exists(con, "er_graph_current_intervals_v3")
+            and _view_exists(con, "er_graph_interval_work_queue_v3")
+            and _view_exists(con, "er_graph_stale_intervals_v3")
+            and _method_exists(con, "graph_execution", "graph_execution_v3_incremental")
+            and _method_exists(con, "graph_run_recovery", "graph_run_recovery_v1")
         )
     return False
 
