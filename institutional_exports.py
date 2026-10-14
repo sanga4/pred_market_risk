@@ -1,7 +1,7 @@
 """Generate point-in-time institutional Parquet releases.
 
 Each release records its `as_of` timestamp, schema/mapping versions, per-dataset row counts,
-SHA-256 hashes and object-storage locations.  Releases are descriptive event data only.
+SHA-256 hashes and object-storage locations. Releases are descriptive event data only.
 """
 
 from __future__ import annotations
@@ -22,50 +22,30 @@ MAPPING_VERSION = "mapping_rules_v2_blocked"
 TAXONOMY_VERSION = "event_ontology_v1"
 
 DATASETS = {
-    "event_families": """
-        SELECT * FROM er_event_families WHERE created_at <= ?
+    "event_families": "SELECT * FROM er_event_families WHERE created_at <= ?",
+    "canonical_events": "SELECT * FROM er_canonical_events WHERE created_at <= ?",
+    "source_contracts": "SELECT * FROM er_source_contracts WHERE first_seen_at <= ?",
+    "contract_versions": "SELECT * FROM er_source_contract_versions WHERE valid_from <= ?",
+    "contract_version_evidence": """
+        SELECT ev.* FROM er_contract_version_evidence ev
+        JOIN er_source_contract_versions v
+          ON v.source_contract_id=ev.source_contract_id AND v.version_no=ev.version_no
+        WHERE v.valid_from <= ?
     """,
-    "canonical_events": """
-        SELECT * FROM er_canonical_events WHERE created_at <= ?
-    """,
-    "source_contracts": """
-        SELECT * FROM er_source_contracts WHERE first_seen_at <= ?
-    """,
-    "contract_versions": """
-        SELECT * FROM er_source_contract_versions WHERE valid_from <= ?
-    """,
-    "event_mappings": """
-        SELECT * FROM er_event_mappings WHERE valid_from <= ?
-    """,
-    "market_observations": """
-        SELECT * FROM er_market_observations WHERE received_at <= ?
-    """,
-    "entities": """
-        SELECT * FROM er_entities WHERE created_at <= ?
-    """,
-    "entity_identifiers": """
-        SELECT * FROM er_entity_identifiers WHERE valid_from IS NULL OR valid_from <= ?
-    """,
-    "instruments": """
-        SELECT * FROM er_instruments WHERE created_at <= ?
-    """,
-    "instrument_identifiers": """
-        SELECT * FROM er_instrument_identifiers WHERE valid_from IS NULL OR valid_from <= ?
-    """,
-    "graph_edges": """
-        SELECT * FROM er_graph_edges WHERE valid_from <= ?
-    """,
+    "event_mappings": "SELECT * FROM er_event_mappings WHERE valid_from <= ?",
+    "market_observations": "SELECT * FROM er_market_observations WHERE received_at <= ?",
+    "entities": "SELECT * FROM er_entities WHERE created_at <= ?",
+    "entity_identifiers": "SELECT * FROM er_entity_identifiers WHERE valid_from IS NULL OR valid_from <= ?",
+    "instruments": "SELECT * FROM er_instruments WHERE created_at <= ?",
+    "instrument_identifiers": "SELECT * FROM er_instrument_identifiers WHERE valid_from IS NULL OR valid_from <= ?",
+    "graph_edges": "SELECT * FROM er_graph_edges WHERE valid_from <= ?",
     "edge_evidence": """
         SELECT ee.* FROM er_edge_evidence ee
         JOIN er_graph_edges ge USING(edge_id)
         WHERE ge.valid_from <= ?
     """,
-    "event_relationships": """
-        SELECT * FROM er_event_relationships WHERE valid_from <= ?
-    """,
-    "quality_issues": """
-        SELECT * FROM er_quality_issues WHERE detected_at <= ?
-    """,
+    "event_relationships": "SELECT * FROM er_event_relationships WHERE valid_from <= ?",
+    "quality_issues": "SELECT * FROM er_quality_issues WHERE detected_at <= ?",
 }
 
 
@@ -119,22 +99,29 @@ def generate_release(as_of: datetime | None = None, notes: str | None = None) ->
             tmpdir = Path(tmp)
             for name, sql in DATASETS.items():
                 out = tmpdir / f"{name}.parquet"
-                # DuckDB parameterizes the temporal boundary inside the subquery.
-                relation = con.execute(sql, [as_of])
-                con.register("release_dataset", relation.fetch_arrow_table())
-                con.execute(
-                    f"COPY release_dataset TO '{str(out).replace("'", "''")}' (FORMAT PARQUET, COMPRESSION ZSTD)"
-                )
-                con.unregister("release_dataset")
+                table = con.execute(sql, [as_of]).fetch_arrow_table()
+                row_count = table.num_rows
+                con.register("release_dataset", table)
+                escaped_out = str(out).replace("'", "''")
+                try:
+                    con.execute(
+                        f"COPY release_dataset TO '{escaped_out}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+                    )
+                finally:
+                    con.unregister("release_dataset")
 
-                row_count = con.execute(sql.replace("SELECT *", "SELECT count(*) AS n", 1), [as_of]).fetchone()[0]
                 digest = _sha256(out)
                 byte_size = out.stat().st_size
                 object_key = f"releases/{release_id}/{name}.parquet"
-                client.upload_file(str(out), bucket, object_key, ExtraArgs={
-                    "ContentType": "application/vnd.apache.parquet",
-                    "Metadata": {"sha256": digest, "release_id": release_id, "dataset": name},
-                })
+                client.upload_file(
+                    str(out),
+                    bucket,
+                    object_key,
+                    ExtraArgs={
+                        "ContentType": "application/vnd.apache.parquet",
+                        "Metadata": {"sha256": digest, "release_id": release_id, "dataset": name},
+                    },
+                )
                 head = client.head_object(Bucket=bucket, Key=object_key)
                 if (head.get("Metadata") or {}).get("sha256") != digest:
                     raise RuntimeError(f"Object-store verification failed for {name}")
@@ -175,10 +162,7 @@ def generate_release(as_of: datetime | None = None, notes: str | None = None) ->
 def list_releases(limit: int = 50) -> list[dict]:
     con = connect(read_only=True)
     try:
-        cur = con.execute(
-            "SELECT * FROM er_data_releases ORDER BY generated_at DESC LIMIT ?",
-            [limit],
-        )
+        cur = con.execute("SELECT * FROM er_data_releases ORDER BY generated_at DESC LIMIT ?", [limit])
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
     finally:
