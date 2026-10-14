@@ -23,6 +23,7 @@ from institutional_curve_api import router as curve_router
 from institutional_graph_v2 import run_graph_pass
 from institutional_history_api import router as history_router
 from institutional_ingest_v3 import run_once
+from institutional_lifecycle import sync_event_lifecycle
 from institutional_mapping_drift import persist_mapping_drift
 from institutional_mapping_v3 import run_mapping_pass
 from institutional_migrations import ensure_schema
@@ -47,6 +48,7 @@ def pipeline_cycle():
         bundle_rows=int(os.getenv("RAW_ARCHIVE_BATCH_SIZE", "5000")),
     )
     mapping = run_mapping_pass()
+    lifecycle = sync_event_lifecycle()
     ontology = run_ontology_pass()
     graph = run_graph_pass()
     reference_versions = sync_reference_versions()
@@ -56,6 +58,7 @@ def pipeline_cycle():
         "ingest": ingest,
         "archive": archive,
         "mapping": mapping,
+        "lifecycle": lifecycle,
         "ontology": ontology,
         "graph": graph,
         "reference_versions": reference_versions,
