@@ -9,6 +9,7 @@ MIGRATIONS = [
     "institutional_schema_003.sql",
     "institutional_schema_004.sql",
     "institutional_schema_005.sql",
+    "institutional_schema_006.sql",
 ]
 
 
