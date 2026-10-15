@@ -13,6 +13,7 @@ def test_all_runtime_migration_paths_use_shared_ledger():
     assert '"institutional_schema_025.sql"' in base_runner
     assert '"institutional_schema_026.sql"' in extension_runner
     assert '"institutional_schema_027.sql"' in extension_runner
+    assert '"institutional_schema_028.sql"' in extension_runner
     assert "er_schema_migrations" in base_runner
     assert "er_schema_migrations" in extension_runner
     assert "ensure_base_schema" in extension_runner
@@ -28,7 +29,7 @@ def test_runtime_collectors_use_promoted_incremental_pipeline():
     for name in ["institutional_service.py", "institutional_worker.py"]:
         body = text(name)
         assert "from institutional_archive_v2 import archive_pending" in body
-        assert "from institutional_ingest_v7 import run_once" in body
+        assert "from institutional_ingest_v8 import run_once" in body
         assert "from institutional_mapping_v6 import run_mapping_pass" in body
         assert "from institutional_mapping_drift import persist_mapping_drift" in body
         assert "from institutional_lifecycle import sync_event_lifecycle" in body
@@ -40,6 +41,15 @@ def test_runtime_collectors_use_promoted_incremental_pipeline():
         assert "RAW_ARCHIVE_MAX_ROWS" in body
         assert "RAW_ARCHIVE_BATCH_SIZE" in body
         assert '"timing_seconds"' in body
+
+
+def test_v8_runtime_uses_direct_temp_persistence_and_set_based_presence():
+    body = text("institutional_ingest_v8.py")
+    assert "from institutional_persist_registered import persist_registered_batch" in body
+    assert "from institutional_presence_v2 import reconcile_presence" in body
+    assert "pa.default_memory_pool().release_unused()" in body
+    assert "rss_max_mb" in body
+    assert "BEGIN TRANSACTION" in body and "ROLLBACK" in body
 
 
 def test_ops_review_uses_current_mapping_semantics():
@@ -137,6 +147,10 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
 
     schema27 = text("institutional_schema_027.sql")
     assert "change_data_capture_v7_bounded" in schema27
+
+    schema28 = text("institutional_schema_028.sql")
+    for value in ["change_data_capture_v8_direct_temp", "presence_reconciliation_v2_set_based"]:
+        assert value in schema28
 
 
 def test_raw_bundle_schema_exists():
