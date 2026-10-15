@@ -142,13 +142,15 @@ def test_identity_watermark_reprocesses_only_semantic_change(monkeypatch, tmp_pa
 
 
 def test_schema32_seeds_identity_state_from_current_mapping_watermark(monkeypatch, tmp_path):
-    # Build through schema 031 first, create a current mapping watermark, then apply schema 032.
+    # Build specifically through schema 031 first. Future migrations must not change this fixture's
+    # boundary: it is testing the one-time schema-032 adoption of the old mapping watermark.
     monkeypatch.setattr(db, "DB", str(tmp_path / "identity-seed.duckdb"))
     os.environ["DB_FORCE_READ_WRITE"] = "true"
     import institutional_migrations_v2 as migrations
 
     original = list(migrations.EXTRA_MIGRATION_FILES)
-    monkeypatch.setattr(migrations, "EXTRA_MIGRATION_FILES", original[:-1])
+    schema32_index = original.index("institutional_schema_032.sql")
+    monkeypatch.setattr(migrations, "EXTRA_MIGRATION_FILES", original[:schema32_index])
     migrations.ensure_schema()
 
     received = datetime(2026, 10, 14, 20, 0, tzinfo=timezone.utc)
