@@ -6,7 +6,9 @@ source N+1. When the next source starts, v11 consumes that already-fetched chunk
 same source iterator, retaining v11's one-chunk intra-source prefetch, whole-source transaction,
 immutable raw lineage, CDC, semantic versioning and presence semantics.
 
-Only one extra source chunk is retained in memory. No source writes occur concurrently.
+Only one extra source chunk is retained in memory. No source writes occur concurrently. Source
+HTTP calls use the thread-local retry client so current-source prefetch and next-source priming do
+not share a requests.Session across threads.
 """
 
 from __future__ import annotations
@@ -18,7 +20,13 @@ import time
 from dataclasses import dataclass
 from typing import Any, Iterator
 
+import institutional_ingest as base
 import institutional_ingest_v11 as v11
+from institutional_http import get_json as thread_safe_get_json
+
+# Universe adapters resolve base.get_json dynamically. Install the same thread-local transport that
+# was proven by ingestion v5 before any cross-source fetch threads are started.
+base.get_json = thread_safe_get_json
 
 log = logging.getLogger("eventrisk.institutional_ingest_v12")
 ORCHESTRATION_VERSION = "cross_source_prime_v12"
