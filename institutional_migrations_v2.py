@@ -16,6 +16,7 @@ from institutional_migrations import ensure_schema as ensure_base_schema
 EXTRA_MIGRATION_FILES = [
     "institutional_schema_026.sql",
     "institutional_schema_027.sql",
+    "institutional_schema_028.sql",
 ]
 
 
