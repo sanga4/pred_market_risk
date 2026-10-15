@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from institutional_readiness_v5 import (
+from institutional_readiness_v6 import (
     evaluate_enrichment_readiness,
     evaluate_identity_readiness,
     evaluate_observed_readiness,
