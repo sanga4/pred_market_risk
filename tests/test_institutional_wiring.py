@@ -9,7 +9,7 @@ def text(name: str) -> str:
 
 def test_all_runtime_migration_paths_use_shared_ledger():
     migration_runner = text("institutional_migrations.py")
-    assert '"institutional_schema_020.sql"' in migration_runner
+    assert '"institutional_schema_025.sql"' in migration_runner
     assert "er_schema_migrations" in migration_runner
 
     for name in ["institutional_service.py", "institutional_worker.py", "migrate_institutional.py"]:
@@ -19,25 +19,27 @@ def test_all_runtime_migration_paths_use_shared_ledger():
         )
 
 
-def test_runtime_collectors_use_verified_archive_cdc_ingest_and_incremental_mapping():
+def test_runtime_collectors_use_promoted_incremental_pipeline():
     for name in ["institutional_service.py", "institutional_worker.py"]:
         body = text(name)
         assert "from institutional_archive_v2 import archive_pending" in body
         assert "from institutional_ingest_v6 import run_once" in body
-        assert "from institutional_mapping_v4 import run_mapping_pass" in body
+        assert "from institutional_mapping_v6 import run_mapping_pass" in body
         assert "from institutional_mapping_drift import persist_mapping_drift" in body
         assert "from institutional_lifecycle import sync_event_lifecycle" in body
-        assert "from institutional_graph_v2 import run_graph_pass" in body
-        assert "from institutional_reference_versions import sync_reference_versions" in body
+        assert "from institutional_ontology_v2 import run_ontology_pass" in body
+        assert "from institutional_graph_v3 import run_graph_pass" in body
+        assert "from institutional_reference_versions_v2 import sync_reference_versions" in body
         assert "from institutional_qa_v3 import run_qa" in body
         assert "from institutional_run_recovery import recover_abandoned_runs" in body
         assert "RAW_ARCHIVE_MAX_ROWS" in body
         assert "RAW_ARCHIVE_BATCH_SIZE" in body
+        assert '"timing_seconds"' in body
 
 
 def test_ops_review_uses_current_mapping_semantics():
     body = text("institutional_ops_api.py")
-    assert "from institutional_mapping_v4 import DIRECTIONS, RELATIONSHIP_TYPES, review_candidate" in body
+    assert "from institutional_mapping_v6 import DIRECTIONS, RELATIONSHIP_TYPES, review_candidate" in body
 
 
 def test_service_exposes_curves_readiness_and_lossless_changefeed():
@@ -104,6 +106,25 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
     schema20 = text("institutional_schema_020.sql")
     for value in ["change_data_capture_v6", "state_change_points_v1"]:
         assert value in schema20
+
+    schema21 = text("institutional_schema_021.sql")
+    for value in ["er_mapping_contract_index", "er_mapping_token_index", "mapping_rules_v5_indexed"]:
+        assert value in schema21
+
+    schema22 = text("institutional_schema_022.sql")
+    for value in ["er_ontology_runs", "er_ontology_event_state", "event_ontology_v2_batched"]:
+        assert value in schema22
+
+    schema23 = text("institutional_schema_023.sql")
+    for value in ["er_mapping_candidate_versions", "er_latest_mapping_candidate_versions"]:
+        assert value in schema23
+
+    schema24 = text("institutional_schema_024.sql")
+    assert "mapping_rules_v6_indexed_history" in schema24
+
+    schema25 = text("institutional_schema_025.sql")
+    for value in ["er_graph_runs", "er_graph_interval_state", "graph_execution_v3_incremental"]:
+        assert value in schema25
 
 
 def test_raw_bundle_schema_exists():
