@@ -4,6 +4,11 @@ v5 preserves the advisory enrichment stages from v4 but uses QA v8's transaction
 identity snapshot guard. If the hot path is between observed-data commit and deterministic identity
 catch-up, enrichment waits for a bounded window and retries QA instead of emitting false critical
 mapping issues. Real stable-snapshot QA failures still fail the run.
+
+The advisory mapping generation is imported lazily inside its stage. Historical mapping modules use
+version-scoped compatibility hooks, so importing the promoted fuzzy mapper at process import time
+would contaminate older generation modules in test/research processes that intentionally load
+several generations together. A production enrichment process still uses mapping v8 exclusively.
 """
 
 from __future__ import annotations
@@ -15,7 +20,6 @@ import time
 from institutional_graph_v3 import run_graph_pass
 from institutional_lifecycle_v2 import sync_event_lifecycle
 from institutional_mapping_drift_v2 import persist_mapping_drift
-from institutional_mapping_v8 import run_mapping_pass
 from institutional_migrations_v2 import ensure_schema
 from institutional_ontology_v2 import run_ontology_pass
 from institutional_qa_v8 import run_qa
@@ -33,6 +37,13 @@ def _run_stage(timings: dict[str, float], name: str, fn, *args, **kwargs):
     timings[name] = round(elapsed, 6)
     log.info("stage completed name=%s elapsed_seconds=%.3f", name, elapsed)
     return result
+
+
+def _run_fuzzy_mapping():
+    # Keep mapping-generation side effects scoped to the actual enrichment execution process.
+    from institutional_mapping_v8 import run_mapping_pass
+
+    return run_mapping_pass()
 
 
 def _run_qa_with_stability_wait(timings: dict[str, float], *, stale_minutes: int) -> dict:
@@ -78,7 +89,7 @@ def _run_qa_with_stability_wait(timings: dict[str, float], *, stale_minutes: int
 def cycle() -> dict:
     cycle_started = time.monotonic()
     timings: dict[str, float] = {}
-    fuzzy_mapping = _run_stage(timings, "fuzzy_mapping", run_mapping_pass)
+    fuzzy_mapping = _run_stage(timings, "fuzzy_mapping", _run_fuzzy_mapping)
     lifecycle = _run_stage(timings, "lifecycle", sync_event_lifecycle)
     ontology = _run_stage(timings, "ontology", run_ontology_pass)
     graph = _run_stage(timings, "graph", run_graph_pass)
