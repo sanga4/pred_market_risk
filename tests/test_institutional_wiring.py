@@ -8,14 +8,19 @@ def text(name: str) -> str:
 
 
 def test_all_runtime_migration_paths_use_shared_ledger():
-    migration_runner = text("institutional_migrations.py")
-    assert '"institutional_schema_025.sql"' in migration_runner
-    assert "er_schema_migrations" in migration_runner
+    base_runner = text("institutional_migrations.py")
+    extension_runner = text("institutional_migrations_v2.py")
+    assert '"institutional_schema_025.sql"' in base_runner
+    assert '"institutional_schema_026.sql"' in extension_runner
+    assert '"institutional_schema_027.sql"' in extension_runner
+    assert "er_schema_migrations" in base_runner
+    assert "er_schema_migrations" in extension_runner
+    assert "ensure_base_schema" in extension_runner
 
     for name in ["institutional_service.py", "institutional_worker.py", "migrate_institutional.py"]:
         body = text(name)
-        assert "from institutional_migrations import ensure_schema" in body, (
-            f"{name} must use the shared restart-safe migration ledger"
+        assert "from institutional_migrations_v2 import ensure_schema" in body, (
+            f"{name} must use the shared restart-safe migration ledger extension"
         )
 
 
@@ -23,7 +28,7 @@ def test_runtime_collectors_use_promoted_incremental_pipeline():
     for name in ["institutional_service.py", "institutional_worker.py"]:
         body = text(name)
         assert "from institutional_archive_v2 import archive_pending" in body
-        assert "from institutional_ingest_v6 import run_once" in body
+        assert "from institutional_ingest_v7 import run_once" in body
         assert "from institutional_mapping_v6 import run_mapping_pass" in body
         assert "from institutional_mapping_drift import persist_mapping_drift" in body
         assert "from institutional_lifecycle import sync_event_lifecycle" in body
@@ -125,6 +130,13 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
     schema25 = text("institutional_schema_025.sql")
     for value in ["er_graph_runs", "er_graph_interval_state", "graph_execution_v3_incremental"]:
         assert value in schema25
+
+    schema26 = text("institutional_schema_026.sql")
+    for value in ["reference_versions_v2_set_based", "mapping_drift_v2_set_based", "institutional_qa_v4_set_based"]:
+        assert value in schema26
+
+    schema27 = text("institutional_schema_027.sql")
+    assert "change_data_capture_v7_bounded" in schema27
 
 
 def test_raw_bundle_schema_exists():
