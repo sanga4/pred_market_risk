@@ -103,6 +103,17 @@ def test_advisory_pass_discovers_candidate_without_creating_identity(monkeypatch
         assert con.execute("SELECT count(*) FROM er_event_mappings").fetchone()[0] == 0
         assert con.execute("SELECT count(*) FROM er_mapping_candidates").fetchone()[0] >= 1
         assert con.execute("SELECT count(*) FROM er_mapping_candidate_versions").fetchone()[0] >= 1
+        pass_row = con.execute(
+            "SELECT details FROM er_mapping_passes WHERE pass_id=?", [result["pass_id"]]
+        ).fetchone()
+        assert pass_row is not None
+        audit = json.loads(pass_row[0])
+        assert audit["execution_version"] == "mapping_advisory_v1_candidate_only"
+        assert audit["identity_owner"] == "institutional_mapping_identity_v1"
+        assert audit["identity_mutations_disabled"] is True
+        assert audit["native_bootstrap_disabled"] is True
+        assert audit["auto_exact_identity_disabled"] is True
+        assert audit["candidate_methodology"] == "mapping_rules_v8_changed_token_frequency"
     finally:
         con.close()
 
@@ -115,6 +126,7 @@ def test_advisory_runtime_is_versioned_and_owned_by_enrichment_v6():
     assert "mapping_advisory_v1_candidate_only" in advisory
     assert "no_identity_bootstrap" in advisory
     assert "no_auto_identity_merge" in advisory
+    assert "_stamp_execution_provenance" in advisory
     assert "identity_mutations_disabled" in worker
     assert "enrichment_path_v6_advisory_only_snapshot_qa" in worker
     assert "mapping_advisory_v1_candidate_only" in schema
