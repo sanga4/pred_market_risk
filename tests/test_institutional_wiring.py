@@ -11,7 +11,7 @@ def test_all_runtime_migration_paths_use_shared_ledger():
     base_runner = text("institutional_migrations.py")
     extension_runner = text("institutional_migrations_v2.py")
     assert '"institutional_schema_025.sql"' in base_runner
-    for migration in range(26, 33):
+    for migration in range(26, 34):
         assert f'"institutional_schema_{migration:03d}.sql"' in extension_runner
     assert "er_schema_migrations" in base_runner
     assert "er_schema_migrations" in extension_runner
@@ -100,6 +100,19 @@ def test_identity_mapping_lane_is_registered_and_separate_from_fuzzy_runtime():
     assert "normalized_rules=l.normalized_rules" in body
     assert "from institutional_mapping_identity_v1" not in text("institutional_worker.py")
     assert "from institutional_mapping_identity_v1" not in text("institutional_service.py")
+
+
+def test_ingest_v10_current_state_pointers_are_staged_only():
+    body = text("institutional_ingest_v10.py")
+    schema33 = text("institutional_schema_033.sql")
+    for value in ["er_raw_current_snapshots", "er_market_current_state", "change_data_capture_v10_stateful"]:
+        assert value in schema33 or value in body
+    assert "LEFT JOIN er_raw_current_snapshots" in body
+    assert "LEFT JOIN er_market_current_state" in body
+    assert "er_latest_market_observations" not in body
+    assert "collect_seen_ids=False" in body
+    assert "from institutional_ingest_v10 import run_once" not in text("institutional_worker.py")
+    assert "from institutional_ingest_v10 import run_once" not in text("institutional_service.py")
 
 
 def test_ops_review_uses_current_serving_mapping_semantics():
@@ -215,6 +228,10 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
     schema32 = text("institutional_schema_032.sql")
     for value in ["er_mapping_identity_state", "er_mapping_identity_work_queue", "identity_mapping_v1_strict_exact"]:
         assert value in schema32
+
+    schema33 = text("institutional_schema_033.sql")
+    for value in ["er_raw_current_snapshots", "er_market_current_state", "change_data_capture_v10_stateful"]:
+        assert value in schema33
 
 
 def test_raw_bundle_schema_exists():
