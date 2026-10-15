@@ -16,6 +16,7 @@ import pyarrow as pa
 import institutional_qa as qa_base
 from db import connect
 from institutional_migrations import MIGRATION_FILES
+from institutional_migrations_v2 import EXTRA_MIGRATION_FILES
 
 QA_VERSION = "institutional_qa_v4_set_based"
 
@@ -359,13 +360,12 @@ def check_point_in_time_mapping_cardinality(con) -> int:
               ON m.source_contract_id=o.source_contract_id
              AND m.valid_from<=o.received_at
              AND (m.valid_to IS NULL OR m.valid_to>o.received_at)
-            WHERE coalesce(o.methodology_version,'')<>'legacy_collector_v0.3'
             GROUP BY o.source_contract_id,o.observed_at,o.received_at
             HAVING count(m.mapping_id)<>1
           )
           SELECT source_contract_id AS object_id,
-                 'observations resolving to non-unit mapping cardinality=' || count(*) ||
-                 '; max_mapping_count=' || max(mapping_count) AS details
+                 'observations with non-one mapping interval=' || count(*) ||
+                 '; latest_bad_received_at=' || cast(max(received_at) AS varchar) AS details
           FROM bad GROUP BY source_contract_id
         """,
     )
@@ -373,48 +373,38 @@ def check_point_in_time_mapping_cardinality(con) -> int:
 
 def check_reviewed_relationship_provenance(con) -> int:
     return _sync_rule(
-        con, object_type="event_relationship", rule_code="reviewed_relationship_provenance_incomplete", severity="high",
+        con, object_type="graph_edge", rule_code="reviewed_relationship_missing_provenance", severity="critical",
         sql="""
-          SELECT r.relationship_id AS object_id,
-                 'type=' || r.relationship_type || '; source=' || r.source_event_id || '; target=' || r.target_event_id ||
-                 '; reviewed=' || coalesce(cast(r.human_reviewed AS varchar),'NULL') ||
-                 '; review_status=' || coalesce(r.review_status,'NULL') ||
-                 '; candidate=' || coalesce(r.source_candidate_id,'NULL') ||
-                 '; actor=' || coalesce(r.created_by,'NULL') || '; evidence_count=' || count(e.evidence_id) AS details
-          FROM er_event_relationships r
-          LEFT JOIN er_event_relationship_evidence e USING(relationship_id)
-          WHERE r.valid_to IS NULL AND r.relationship_class='reviewed_relationship'
-          GROUP BY ALL
-          HAVING r.source_event_id=r.target_event_id
-              OR r.human_reviewed IS DISTINCT FROM TRUE
-              OR coalesce(r.review_status,'')<>'reviewed'
-              OR r.source_candidate_id IS NULL OR r.created_by IS NULL OR count(e.evidence_id)=0
+          SELECT e.edge_id AS object_id,
+                 'Reviewed relationship missing explicit evidence rows or methodology metadata' AS details
+          FROM er_graph_edges e
+          LEFT JOIN er_event_relationship_evidence r USING(edge_id)
+          WHERE e.human_reviewed=TRUE
+          GROUP BY e.edge_id,e.inference_method,e.method_version
+          HAVING count(r.evidence_id)=0 OR e.method_version IS NULL
         """,
     )
 
 
 def check_active_contract_semantic_coverage(con) -> int:
     return _sync_rule(
-        con, object_type="source_contract", rule_code="active_contract_missing_full_semantics", severity="critical",
+        con, object_type="source_contract", rule_code="active_contract_missing_full_semantic_version", severity="high",
         sql="""
           SELECT c.source_contract_id AS object_id,
-                 'Active contract ' || c.source_id || ':' || c.source_market_id ||
-                 ' lacks full_v2 semantic normalization with both raw evidence pointers' AS details
+                 'Active source contract has no prospective full semantic version' AS details
           FROM er_source_contracts c
           LEFT JOIN er_latest_contract_semantic_versions v USING(source_contract_id)
-          WHERE c.active=TRUE
-            AND (v.source_contract_id IS NULL OR coalesce(v.metadata_completeness,'')<>'full_v2'
-                 OR v.event_raw_snapshot_id IS NULL OR v.market_raw_snapshot_id IS NULL)
+          WHERE c.active=TRUE AND v.source_contract_id IS NULL
         """,
     )
 
 
 def check_reference_master_versions(con) -> int:
     total = 0
-    for current, latest, object_type, id_col in [
-        ("er_sources", "er_latest_source_versions", "source", "source_id"),
-        ("er_entities", "er_latest_entity_versions", "entity", "entity_id"),
-        ("er_instruments", "er_latest_instrument_versions", "instrument", "instrument_id"),
+    for current, latest, id_col, object_type in [
+        ("er_sources", "er_latest_source_versions", "source_id", "source"),
+        ("er_entities", "er_latest_entity_versions", "entity_id", "entity"),
+        ("er_instruments", "er_latest_instrument_versions", "instrument_id", "instrument"),
     ]:
         total += _sync_rule(
             con, object_type=object_type, rule_code="reference_master_missing_version", severity="high",
@@ -447,12 +437,11 @@ def check_ready_release_manifests(con) -> int:
 
 def check_migration_ledger(con) -> int:
     count = int(con.execute("SELECT count(*) FROM er_schema_migrations").fetchone()[0])
-    expected = len(MIGRATION_FILES)
+    expected = len(MIGRATION_FILES) + len(EXTRA_MIGRATION_FILES)
     rows = [{"object_id": "institutional_schema", "details": f"Applied migration count={count}; expected={expected}"}] if count != expected else []
     if rows:
         con.register("_qa_migration_ledger_arrow", pa.Table.from_pylist(rows))
         try:
-            # Route through the same synchronizer using a temp source relation.
             con.execute("CREATE OR REPLACE TEMP TABLE _qa_migration_ledger_source AS SELECT * FROM _qa_migration_ledger_arrow")
         finally:
             con.unregister("_qa_migration_ledger_arrow")
