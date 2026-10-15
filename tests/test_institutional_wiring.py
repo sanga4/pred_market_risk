@@ -14,6 +14,7 @@ def test_all_runtime_migration_paths_use_shared_ledger():
     assert '"institutional_schema_026.sql"' in extension_runner
     assert '"institutional_schema_027.sql"' in extension_runner
     assert '"institutional_schema_028.sql"' in extension_runner
+    assert '"institutional_schema_029.sql"' in extension_runner
     assert "er_schema_migrations" in base_runner
     assert "er_schema_migrations" in extension_runner
     assert "ensure_base_schema" in extension_runner
@@ -41,6 +42,14 @@ def test_runtime_collectors_use_promoted_incremental_pipeline():
         assert "RAW_ARCHIVE_MAX_ROWS" in body
         assert "RAW_ARCHIVE_BATCH_SIZE" in body
         assert '"timing_seconds"' in body
+
+
+def test_mapping_v7_is_registered_but_not_promoted_without_acceptance():
+    body = text("institutional_mapping_v7.py")
+    schema29 = text("institutional_schema_029.sql")
+    assert "mapping_rules_v7_python_overlap" in body
+    assert "mapping_rules_v7_python_overlap" in schema29
+    assert "python_meaningful_tokens_v1" in body
 
 
 def test_v8_runtime_uses_direct_temp_persistence_and_set_based_presence():
@@ -151,6 +160,9 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
     schema28 = text("institutional_schema_028.sql")
     for value in ["change_data_capture_v8_direct_temp", "presence_reconciliation_v2_set_based"]:
         assert value in schema28
+
+    schema29 = text("institutional_schema_029.sql")
+    assert "mapping_rules_v7_python_overlap" in schema29
 
 
 def test_raw_bundle_schema_exists():
