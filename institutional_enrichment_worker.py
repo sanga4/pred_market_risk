@@ -2,7 +2,7 @@
 
 This worker preserves the full advisory/normalization quality pipeline while keeping it off the
 cadence-critical observed-data path. Fuzzy mapping only creates review candidates; strict identity
-continues to be owned by `institutional_mapping_identity_v1` on the hot path.
+continues to be owned by the deterministic hot-path identity worker.
 """
 
 from __future__ import annotations
