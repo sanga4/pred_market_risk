@@ -119,9 +119,11 @@ def test_qa_v9_source_enforces_two_phase_boundary():
     body = (ROOT / "institutional_qa_v9.py").read_text()
     worker = (ROOT / "institutional_enrichment_worker_v8.py").read_text()
     schema = (ROOT / "institutional_schema_051.sql").read_text()
+    migrations = (ROOT / "institutional_migrations_v2.py").read_text()
     assert "connect(read_only=True)" in body
     assert "core_fingerprint_changed_during_read_evaluation" in body
     assert "read_only_snapshot_then_short_issue_sync" in body
     assert "from institutional_qa_v9 import run_qa" in worker
     assert "enrichment_path_v8_local_pairs_two_phase_qa" in worker
     assert "institutional_qa_v9_two_phase_read_snapshot" in schema
+    assert '"institutional_schema_051.sql"' in migrations
