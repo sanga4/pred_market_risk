@@ -192,6 +192,139 @@ def source_comparison(event_id: str):
         con.close()
 
 
+@router.get("/v1/instruments")
+def list_instruments(
+    ticker: Optional[str] = None,
+    sector: Optional[str] = None,
+    country: Optional[str] = None,
+    active: bool = True,
+    after: Optional[str] = None,
+    limit: int = Query(250, ge=1, le=2000),
+):
+    """Discover reference instruments using stable keyset pagination.
+
+    Source exchange labels are intentionally distinct from `exchange_mic`; issuer_entity_id and
+    exchange_mic remain null until a stronger reference source actually establishes them.
+    """
+    con = db_read()
+    try:
+        where = ["r.active=?"]
+        params: list[object] = [active]
+        if ticker:
+            where.append("upper(r.source_ticker)=upper(?)")
+            params.append(ticker)
+        if sector:
+            where.append("r.sector=?")
+            params.append(sector)
+        if country:
+            where.append("r.country=?")
+            params.append(country)
+        if after:
+            where.append("r.instrument_id>?")
+            params.append(after)
+        params.append(limit + 1)
+        rows = rows_dict(con.execute(
+            f"""SELECT instrument_id,issuer_entity_id,instrument_type,canonical_name,currency,
+                       exchange_mic,active,source_system,source_ticker,source_name,exchange_label,
+                       asset_class,sector,industry,country,source_record_source,source_updated_at,
+                       reference_recorded_at,reference_updated_at
+                FROM er_instrument_reference_current r
+                WHERE {' AND '.join(where)}
+                ORDER BY instrument_id
+                LIMIT ?""",
+            params,
+        ))
+        has_more = len(rows) > limit
+        items = rows[:limit]
+        return {
+            "items": items,
+            "next_after": items[-1]["instrument_id"] if has_more and items else None,
+            "count": len(items),
+            "filters": {"ticker": ticker, "sector": sector, "country": country, "active": active},
+            "note": "Reference instruments are source-described; null issuer/MIC fields are intentionally unasserted.",
+        }
+    finally:
+        con.close()
+
+
+@router.get("/v1/instruments/{instrument_id}/as-of")
+def instrument_as_of(instrument_id: str, at: datetime):
+    con = db_read()
+    try:
+        instrument = rows_dict(con.execute(
+            """SELECT * FROM er_instrument_versions
+               WHERE instrument_id=? AND valid_from<=? AND (valid_to IS NULL OR valid_to>?)
+               ORDER BY version_no DESC LIMIT 1""",
+            [instrument_id, at, at],
+        ))
+        reference = rows_dict(con.execute(
+            """SELECT * FROM er_instrument_reference_attribute_versions
+               WHERE instrument_id=? AND valid_from<=? AND (valid_to IS NULL OR valid_to>?)
+               ORDER BY version_no DESC LIMIT 1""",
+            [instrument_id, at, at],
+        ))
+        if not instrument and not reference:
+            raise HTTPException(404, "Instrument not known at requested as-of time")
+        identifiers = rows_dict(con.execute(
+            """SELECT instrument_id,identifier_type,identifier_value,source,valid_from,valid_to
+               FROM er_instrument_identifiers
+               WHERE instrument_id=? AND (valid_from IS NULL OR valid_from<=?)
+                 AND (valid_to IS NULL OR valid_to>?)
+               ORDER BY identifier_type,identifier_value""",
+            [instrument_id, at, at],
+        ))
+        return {
+            "instrument_id": instrument_id,
+            "as_of": at,
+            "instrument": instrument[0] if instrument else None,
+            "reference": reference[0] if reference else None,
+            "identifiers": identifiers,
+        }
+    finally:
+        con.close()
+
+
+@router.get("/v1/instruments/{instrument_id}")
+def get_instrument(instrument_id: str):
+    con = db_read()
+    try:
+        current = rows_dict(con.execute(
+            "SELECT * FROM er_instrument_reference_current WHERE instrument_id=?",
+            [instrument_id],
+        ))
+        if not current:
+            raise HTTPException(404, "Instrument not found")
+        identifiers = rows_dict(con.execute(
+            """SELECT * FROM er_instrument_identifiers
+               WHERE instrument_id=? ORDER BY identifier_type,identifier_value,valid_from""",
+            [instrument_id],
+        ))
+        instrument_versions = rows_dict(con.execute(
+            "SELECT * FROM er_instrument_versions WHERE instrument_id=? ORDER BY version_no",
+            [instrument_id],
+        ))
+        reference_versions = rows_dict(con.execute(
+            """SELECT * FROM er_instrument_reference_attribute_versions
+               WHERE instrument_id=? ORDER BY version_no""",
+            [instrument_id],
+        ))
+        issuer = None
+        issuer_id = current[0].get("issuer_entity_id")
+        if issuer_id:
+            rows = rows_dict(con.execute("SELECT * FROM er_entities WHERE entity_id=?", [issuer_id]))
+            issuer = rows[0] if rows else None
+        return {
+            "instrument": current[0],
+            "identifiers": identifiers,
+            "instrument_versions": instrument_versions,
+            "reference_versions": reference_versions,
+            "issuer": issuer,
+            "note": "Issuer and MIC are returned only when explicitly established by reference data; EventRisk does not infer them from names.",
+        }
+    finally:
+        con.close()
+
+
 @router.get("/v1/quality")
 def quality_summary(severity: Optional[str] = None, limit: int = Query(250, ge=1, le=2000)):
     con = db_read()
