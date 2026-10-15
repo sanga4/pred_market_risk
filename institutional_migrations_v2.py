@@ -38,6 +38,7 @@ EXTRA_MIGRATION_FILES = [
     "institutional_schema_047.sql",
     "institutional_schema_048.sql",
     "institutional_schema_049.sql",
+    "institutional_schema_050.sql",
 ]
 
 
