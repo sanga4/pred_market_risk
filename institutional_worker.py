@@ -15,7 +15,7 @@ from institutional_archive_v2 import archive_pending
 from institutional_ingest_v11 import run_once
 from institutional_mapping_identity_v1 import run_identity_pass
 from institutional_migrations_v2 import ensure_schema
-from institutional_readiness_v4 import evaluate_identity_readiness, evaluate_observed_readiness
+from institutional_readiness_v5 import evaluate_identity_readiness, evaluate_observed_readiness
 from institutional_run_recovery import recover_abandoned_runs
 
 log = logging.getLogger("eventrisk.worker")
