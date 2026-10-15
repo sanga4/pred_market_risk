@@ -1,4 +1,9 @@
-"""Dedicated production worker for EventRisk institutional ingestion."""
+"""Dedicated production worker for EventRisk institutional core data.
+
+The frequent path intentionally contains only work required for fresh observed curves and
+strict deterministic canonical identity. Advisory fuzzy discovery, ontology, graph enrichment,
+reference synchronization, drift analysis and full QA run in `institutional_enrichment_worker`.
+"""
 
 from __future__ import annotations
 
@@ -7,15 +12,10 @@ import os
 import time
 
 from institutional_archive_v2 import archive_pending
-from institutional_graph_v3 import run_graph_pass
-from institutional_ingest_v8 import run_once
-from institutional_lifecycle import sync_event_lifecycle
-from institutional_mapping_drift_v2 import persist_mapping_drift
-from institutional_mapping_v7 import run_mapping_pass
+from institutional_ingest_v10 import run_once
+from institutional_mapping_identity_v1 import run_identity_pass
 from institutional_migrations_v2 import ensure_schema
-from institutional_ontology_v2 import run_ontology_pass
-from institutional_qa_v4 import run_qa
-from institutional_reference_versions_v2 import sync_reference_versions
+from institutional_readiness_v4 import evaluate_identity_readiness, evaluate_observed_readiness
 from institutional_run_recovery import recover_abandoned_runs
 
 log = logging.getLogger("eventrisk.worker")
@@ -49,33 +49,29 @@ def cycle() -> dict:
     if archive.get("configured") and archive.get("failed", 0):
         raise RuntimeError(f"Raw archive failed for {archive['failed']} snapshot(s): {archive}")
 
-    mapping = _run_stage(timings, "mapping", run_mapping_pass)
-    lifecycle = _run_stage(timings, "lifecycle", sync_event_lifecycle)
-    ontology = _run_stage(timings, "ontology", run_ontology_pass)
-    graph = _run_stage(timings, "graph", run_graph_pass)
-    reference_versions = _run_stage(timings, "reference_versions", sync_reference_versions)
-    mapping_drift = _run_stage(timings, "mapping_drift", persist_mapping_drift)
-    qa = _run_stage(
+    identity = _run_stage(timings, "identity", run_identity_pass)
+    observed_readiness = _run_stage(
         timings,
-        "qa",
-        run_qa,
+        "observed_readiness",
+        evaluate_observed_readiness,
         stale_minutes=max(20, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")) // 60 * 4),
+        require_archive=None,
     )
-    if qa.get("critical_issues", 0):
-        raise RuntimeError(f"Institutional QA has {qa['critical_issues']} open critical issue(s): {qa}")
+    identity_readiness = _run_stage(timings, "identity_readiness", evaluate_identity_readiness)
+    if not observed_readiness.get("ready"):
+        raise RuntimeError(f"Observed-data readiness failed: {observed_readiness.get('failed_controls')}")
+    if not identity_readiness.get("ready"):
+        raise RuntimeError(f"Deterministic identity readiness failed: {identity_readiness.get('failed_controls')}")
 
     timings["cycle_total"] = round(time.monotonic() - cycle_started, 6)
     return {
         "ingest": ingest,
         "archive": archive,
-        "mapping": mapping,
-        "lifecycle": lifecycle,
-        "ontology": ontology,
-        "graph": graph,
-        "reference_versions": reference_versions,
-        "mapping_drift": mapping_drift,
-        "qa": qa,
+        "identity": identity,
+        "observed_readiness": observed_readiness,
+        "identity_readiness": identity_readiness,
         "timing_seconds": timings,
+        "runtime_topology": "hot_path_v1_v10_identity",
     }
 
 
