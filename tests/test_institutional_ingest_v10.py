@@ -154,11 +154,14 @@ def test_v10_pointer_updates_roll_back_with_source_transaction(monkeypatch, tmp_
 
 
 def test_schema33_backfills_current_pointers_from_existing_history(monkeypatch, tmp_path):
+    # Build specifically through schema 032 first. Future migrations must not move this boundary:
+    # this test proves schema 033 backfills pointer state from already-existing immutable history.
     monkeypatch.setattr(db, "DB", str(tmp_path / "pointer-backfill.duckdb"))
     os.environ["DB_FORCE_READ_WRITE"] = "true"
     import institutional_migrations_v2 as migrations
     original_files = list(migrations.EXTRA_MIGRATION_FILES)
-    monkeypatch.setattr(migrations, "EXTRA_MIGRATION_FILES", original_files[:-1])
+    schema33_index = original_files.index("institutional_schema_033.sql")
+    monkeypatch.setattr(migrations, "EXTRA_MIGRATION_FILES", original_files[:schema33_index])
     migrations.ensure_schema()
 
     con = db.connect()
