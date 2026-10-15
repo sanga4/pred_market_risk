@@ -1,15 +1,14 @@
 """Stateless public EventRisk institutional API.
 
-This service is intentionally separate from ingestion and enrichment workers. It never runs
-schema migrations, recovery, collection, mapping, graph, export-generation, or other write-side
-jobs on startup. The database must already be provisioned by the controlled MotherDuck worker
-pipeline.
+This process is a read/query plane only. Source ingestion, schema migrations, identity mapping,
+enrichment, release generation, key administration and raw-payload restoration are owned by
+separate controlled workers/admin tooling.
 
-Public API boundary:
-- read/query surfaces only;
-- /internal/* routes are not mounted and are also rejected by middleware as defense in depth;
-- source capture and normalization remain owned by MotherDuck Flights;
-- institutions receive observed/normalized event data and own downstream investment decisions.
+Public boundary:
+- only read/query routes are mounted;
+- /internal/* is rejected as defense in depth;
+- no write-side model modules are imported;
+- institutions receive event data and retain downstream scenario/investment decisions.
 """
 
 from __future__ import annotations
@@ -18,17 +17,16 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from db import connect
-from institutional_admin_api import router as release_router
 from institutional_api import router as data_router
 from institutional_auth import authenticate_key, extract_bearer
 from institutional_changefeed_api import router as changefeed_router
 from institutional_curve_api import router as curve_router
 from institutional_history_api import router as history_router
-from institutional_ops_api import router as ops_router
+from institutional_public_queries_api import router as public_queries_router
 from institutional_readiness_api import router as readiness_router
 from institutional_stream import router as stream_router
 
@@ -50,11 +48,6 @@ REQUIRED_TABLES = (
 
 
 def _require_warehouse() -> dict:
-    """Fail fast unless the already-managed institutional warehouse is queryable.
-
-    This check is deliberately read-only. A web process must never repair or migrate production
-    data as a side effect of starting an HTTP server.
-    """
     con = connect(read_only=True)
     try:
         missing = []
@@ -99,7 +92,6 @@ app = FastAPI(
 
 @app.middleware("http")
 async def public_boundary_and_auth(request: Request, call_next):
-    # Defense in depth even though internal routes are excluded from the public router tree below.
     if request.url.path == "/internal" or request.url.path.startswith("/internal/"):
         return JSONResponse({"detail": "Not found"}, status_code=404)
 
@@ -129,9 +121,7 @@ def health():
             active_contracts = int(
                 con.execute("SELECT count(*) FROM er_source_contracts WHERE active=TRUE").fetchone()[0]
             )
-            served_events = int(
-                con.execute("SELECT count(*) FROM er_served_canonical_events").fetchone()[0]
-            )
+            served_events = int(con.execute("SELECT count(*) FROM er_served_canonical_events").fetchone()[0])
             critical_qa = int(
                 con.execute(
                     "SELECT count(*) FROM er_quality_issues WHERE status='open' AND severity='critical'"
@@ -185,30 +175,10 @@ def root():
     }
 
 
-def _include_public_routes(source_router: APIRouter) -> None:
-    """Mount only public routes from a mixed router.
-
-    Some legacy modules deliberately colocate read-only /v1 routes and authenticated /internal
-    operator routes. The public deployment gets a filtered router so internal paths are absent
-    from both request routing and generated OpenAPI documentation.
-    """
-    public_router = APIRouter()
-    for route in source_router.routes:
-        path = getattr(route, "path", "") or ""
-        if path == "/internal" or path.startswith("/internal/"):
-            continue
-        public_router.routes.append(route)
-    app.include_router(public_router)
-
-
-for _router in (
-    data_router,
-    curve_router,
-    changefeed_router,
-    ops_router,
-    history_router,
-    readiness_router,
-    release_router,
-    stream_router,
-):
-    _include_public_routes(_router)
+app.include_router(data_router)
+app.include_router(curve_router)
+app.include_router(changefeed_router)
+app.include_router(public_queries_router)
+app.include_router(history_router)
+app.include_router(readiness_router)
+app.include_router(stream_router)
