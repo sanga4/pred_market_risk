@@ -7,9 +7,9 @@ def text(name: str) -> str:
     return (ROOT / name).read_text()
 
 
-def test_extension_migration_ledger_registers_every_schema_through_048():
+def test_extension_migration_ledger_registers_every_schema_through_049():
     body = text("institutional_migrations_v2.py")
-    for migration in range(26, 49):
+    for migration in range(26, 50):
         assert f'"institutional_schema_{migration:03d}.sql"' in body
         assert (ROOT / f"institutional_schema_{migration:03d}.sql").exists()
 
@@ -46,3 +46,16 @@ def test_enrichment_worker_v5_uses_snapshot_safe_qa_v8():
     assert "identity_snapshot_state" in qa
     assert "check_latest_completed_full_universe_runs" in qa
     assert "institutional_qa_v8_snapshot_guard_completed_runs" in schema48
+
+
+def test_enrichment_worker_v6_is_advisory_only_for_relationship_discovery():
+    worker = text("institutional_enrichment_worker_v6.py")
+    advisory = text("institutional_mapping_advisory_v1.py")
+    schema49 = text("institutional_schema_049.sql")
+    assert "from institutional_mapping_advisory_v1 import run_mapping_pass" in worker
+    assert "identity_mutations_disabled" in worker
+    assert "native_events_created" in worker and "auto_exact_mappings" in worker
+    assert "no_identity_bootstrap" in advisory
+    assert "no_auto_identity_merge" in advisory
+    assert "mapping_advisory_v1_candidate_only" in schema49
+    assert "enrichment_path_v6_advisory_only_snapshot_qa" in schema49
