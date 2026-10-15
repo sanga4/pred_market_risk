@@ -10,11 +10,11 @@ from institutional_archive_v2 import archive_pending
 from institutional_graph_v3 import run_graph_pass
 from institutional_ingest_v8 import run_once
 from institutional_lifecycle import sync_event_lifecycle
-from institutional_mapping_drift import persist_mapping_drift
+from institutional_mapping_drift_v2 import persist_mapping_drift
 from institutional_mapping_v6 import run_mapping_pass
 from institutional_migrations_v2 import ensure_schema
 from institutional_ontology_v2 import run_ontology_pass
-from institutional_qa_v3 import run_qa
+from institutional_qa_v4 import run_qa
 from institutional_reference_versions_v2 import sync_reference_versions
 from institutional_run_recovery import recover_abandoned_runs
 
