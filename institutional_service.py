@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -21,18 +22,18 @@ from institutional_archive_v2 import archive_pending
 from institutional_auth import authenticate_key, extract_bearer
 from institutional_changefeed_api import router as changefeed_router
 from institutional_curve_api import router as curve_router
-from institutional_graph_v2 import run_graph_pass
+from institutional_graph_v3 import run_graph_pass
 from institutional_history_api import router as history_router
 from institutional_ingest_v6 import run_once
 from institutional_lifecycle import sync_event_lifecycle
 from institutional_mapping_drift import persist_mapping_drift
-from institutional_mapping_v4 import run_mapping_pass
+from institutional_mapping_v6 import run_mapping_pass
 from institutional_migrations import ensure_schema
-from institutional_ontology import run_ontology_pass
+from institutional_ontology_v2 import run_ontology_pass
 from institutional_ops_api import router as ops_router
 from institutional_qa_v3 import run_qa
 from institutional_readiness_api import router as readiness_router
-from institutional_reference_versions import sync_reference_versions
+from institutional_reference_versions_v2 import sync_reference_versions
 from institutional_run_recovery import recover_abandoned_runs
 from institutional_stream import router as stream_router
 
@@ -43,19 +44,40 @@ logging.basicConfig(
 log = logging.getLogger("eventrisk.institutional_service")
 
 
+def _run_stage(timings: dict[str, float], name: str, fn, *args, **kwargs):
+    started = time.monotonic()
+    result = fn(*args, **kwargs)
+    elapsed = time.monotonic() - started
+    timings[name] = round(elapsed, 6)
+    log.info("stage completed name=%s elapsed_seconds=%.3f", name, elapsed)
+    return result
+
+
 def pipeline_cycle():
-    ingest = run_once()
-    archive = archive_pending(
+    cycle_started = time.monotonic()
+    timings: dict[str, float] = {}
+
+    ingest = _run_stage(timings, "ingest", run_once)
+    archive = _run_stage(
+        timings,
+        "archive",
+        archive_pending,
         max_rows=int(os.getenv("RAW_ARCHIVE_MAX_ROWS", "20000")),
         bundle_rows=int(os.getenv("RAW_ARCHIVE_BATCH_SIZE", "5000")),
     )
-    mapping = run_mapping_pass()
-    lifecycle = sync_event_lifecycle()
-    ontology = run_ontology_pass()
-    graph = run_graph_pass()
-    reference_versions = sync_reference_versions()
-    mapping_drift = persist_mapping_drift()
-    qa = run_qa(stale_minutes=max(20, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")) // 60 * 4))
+    mapping = _run_stage(timings, "mapping", run_mapping_pass)
+    lifecycle = _run_stage(timings, "lifecycle", sync_event_lifecycle)
+    ontology = _run_stage(timings, "ontology", run_ontology_pass)
+    graph = _run_stage(timings, "graph", run_graph_pass)
+    reference_versions = _run_stage(timings, "reference_versions", sync_reference_versions)
+    mapping_drift = _run_stage(timings, "mapping_drift", persist_mapping_drift)
+    qa = _run_stage(
+        timings,
+        "qa",
+        run_qa,
+        stale_minutes=max(20, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")) // 60 * 4),
+    )
+    timings["cycle_total"] = round(time.monotonic() - cycle_started, 6)
     return {
         "ingest": ingest,
         "archive": archive,
@@ -66,6 +88,7 @@ def pipeline_cycle():
         "reference_versions": reference_versions,
         "mapping_drift": mapping_drift,
         "qa": qa,
+        "timing_seconds": timings,
     }
 
 
