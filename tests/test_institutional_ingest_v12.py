@@ -50,7 +50,41 @@ def test_run_once_primes_next_source_without_changing_order(monkeypatch):
     assert results[1]["orchestration"]["primed_rows"] == 2
 
 
-def test_run_once_fails_closed_when_next_source_prime_fails(monkeypatch):
+def test_prime_failure_falls_back_to_authoritative_v11_ingestion(monkeypatch):
+    class A:
+        def iter_snapshots(self):
+            yield "a1"
+
+    class Flaky:
+        instances = 0
+
+        def __init__(self):
+            type(self).instances += 1
+            self.instance_no = type(self).instances
+
+        def iter_snapshots(self):
+            if self.instance_no == 1:
+                raise RuntimeError("prime transport failed")
+            yield from ["b1", "b2"]
+
+    monkeypatch.setattr(v12.v11, "CHUNK_ROWS", 2)
+    monkeypatch.setattr(v12.v11, "ADAPTERS", {"a": A, "b": Flaky})
+
+    def fake_ingest(source_id):
+        rows = list(v12.v11.ADAPTERS[source_id]().iter_snapshots())
+        return {"source_id": source_id, "status": "success", "records_written": len(rows)}
+
+    monkeypatch.setattr(v12.v11, "ingest_source", fake_ingest)
+    results = v12.run_once(["a", "b"])
+
+    assert results[0]["status"] == "success"
+    assert results[1]["status"] == "success"
+    assert results[1]["records_written"] == 2
+    assert results[1]["orchestration"]["prime_fallback"] is True
+    assert "prime transport failed" in results[1]["orchestration"]["prime_error"]
+
+
+def test_real_source_failure_after_prime_fallback_still_returns_source_failure(monkeypatch):
     class A:
         def iter_snapshots(self):
             yield "a1"
@@ -72,5 +106,5 @@ def test_run_once_fails_closed_when_next_source_prime_fails(monkeypatch):
 
     assert results[0]["status"] == "success"
     assert results[1]["status"] == "failed"
-    assert results[1]["phase"] == "cross_source_prime"
+    assert results[1]["phase"] == "source"
     assert "source page failed" in results[1]["error"]
