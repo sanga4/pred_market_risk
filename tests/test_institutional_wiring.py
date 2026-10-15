@@ -11,7 +11,7 @@ def test_all_runtime_migration_paths_use_shared_ledger():
     base_runner = text("institutional_migrations.py")
     extension_runner = text("institutional_migrations_v2.py")
     assert '"institutional_schema_025.sql"' in base_runner
-    for migration in range(26, 34):
+    for migration in range(26, 35):
         assert f'"institutional_schema_{migration:03d}.sql"' in extension_runner
     assert "er_schema_migrations" in base_runner
     assert "er_schema_migrations" in extension_runner
@@ -113,6 +113,19 @@ def test_ingest_v10_current_state_pointers_are_staged_only():
     assert "collect_seen_ids=False" in body
     assert "from institutional_ingest_v10 import run_once" not in text("institutional_worker.py")
     assert "from institutional_ingest_v10 import run_once" not in text("institutional_service.py")
+
+
+def test_layered_readiness_is_registered_and_api_exposes_each_lane():
+    body = text("institutional_readiness_v4.py")
+    api = text("institutional_readiness_api.py")
+    schema34 = text("institutional_schema_034.sql")
+    assert "institutional_readiness_v4_layered" in body
+    assert "institutional_readiness_v4_layered" in schema34
+    assert "evaluate_observed_readiness" in api
+    assert "evaluate_identity_readiness" in api
+    assert "evaluate_enrichment_readiness" in api
+    for path in ["/v1/readiness/observed", "/v1/readiness/identity", "/v1/readiness/enrichment"]:
+        assert path in api
 
 
 def test_ops_review_uses_current_serving_mapping_semantics():
@@ -232,6 +245,9 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
     schema33 = text("institutional_schema_033.sql")
     for value in ["er_raw_current_snapshots", "er_market_current_state", "change_data_capture_v10_stateful"]:
         assert value in schema33
+
+    schema34 = text("institutional_schema_034.sql")
+    assert "institutional_readiness_v4_layered" in schema34
 
 
 def test_raw_bundle_schema_exists():
