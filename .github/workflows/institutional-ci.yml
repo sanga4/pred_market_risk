@@ -25,7 +25,7 @@ jobs:
         run: |
           python -m py_compile \
             institutional_http.py \
-            institutional_ingest.py institutional_ingest_v2.py institutional_ingest_v3.py institutional_ingest_v4.py institutional_ingest_v5.py institutional_ingest_v6.py institutional_universe_adapters.py \
+            institutional_ingest.py institutional_ingest_v2.py institutional_ingest_v3.py institutional_ingest_v4.py institutional_ingest_v5.py institutional_ingest_v6.py institutional_ingest_v7.py institutional_universe_adapters.py \
             institutional_archive.py institutional_archive_v2.py \
             institutional_mapping.py institutional_mapping_v2.py institutional_mapping_v3.py institutional_mapping_v4.py institutional_mapping_v5.py institutional_mapping_v6.py institutional_mapping_drift.py \
             institutional_ontology.py institutional_ontology_v2.py institutional_lifecycle.py \
@@ -37,6 +37,6 @@ jobs:
             institutional_history_api.py institutional_admin_api.py institutional_auth.py \
             institutional_stream.py institutional_exports.py institutional_exports_v2.py institutional_exports_v3.py \
             institutional_run_recovery.py institutional_service.py institutional_worker.py institutional_backfill.py \
-            institutional_migrations.py migrate_institutional.py eventrisk_sdk.py
+            institutional_migrations.py institutional_migrations_v2.py migrate_institutional.py eventrisk_sdk.py
       - name: Run institutional tests
         run: python -m pytest -q tests
