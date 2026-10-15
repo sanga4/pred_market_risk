@@ -50,7 +50,7 @@ def _setup():
         ("k1", "kalshi", 1, "china blockade taiwan 2027", "official confirmation", "2027-12-31", "2027-12-31"),
         ("p1", "polymarket", 3, "china blockade taiwan 2027", "official confirmation", "2027-12-31", "2027-12-31"),
         ("p2", "polymarket", 2, "china blockade taiwan 2028", "different source rules", "2028-12-31", "2028-12-31"),
-        ("p3", "polymarket", 1, "us recession 2027", "nber recession", "2027-12-31", "2027-12-31"),
+        ("p3", "polymarket", 1, "us economic recession 2027", "nber recession", "2027-12-31", "2027-12-31"),
         ("k2", "kalshi", 1, "oil price 100 2027", "settlement price", "2027-12-31", "2027-12-31"),
     ]
     for contract_id, source_id, version, title, rules, deadline, bucket in rows:
