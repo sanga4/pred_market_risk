@@ -7,7 +7,7 @@ pipeline.
 
 Public API boundary:
 - read/query surfaces only;
-- every /internal/* route is rejected before routing, even if an admin token is present;
+- /internal/* routes are not mounted and are also rejected by middleware as defense in depth;
 - source capture and normalization remain owned by MotherDuck Flights;
 - institutions receive observed/normalized event data and own downstream investment decisions.
 """
@@ -18,7 +18,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from db import connect
@@ -99,7 +99,7 @@ app = FastAPI(
 
 @app.middleware("http")
 async def public_boundary_and_auth(request: Request, call_next):
-    # Defense in depth: internal write/ops endpoints are never exposed on the investor-facing host.
+    # Defense in depth even though internal routes are excluded from the public router tree below.
     if request.url.path == "/internal" or request.url.path.startswith("/internal/"):
         return JSONResponse({"detail": "Not found"}, status_code=404)
 
@@ -185,13 +185,30 @@ def root():
     }
 
 
-# These routers contain the read surfaces. Any /internal/* routes they also define are blocked by
-# middleware above, so the investor-facing process cannot be used as an administrative control plane.
-app.include_router(data_router)
-app.include_router(curve_router)
-app.include_router(changefeed_router)
-app.include_router(ops_router)
-app.include_router(history_router)
-app.include_router(readiness_router)
-app.include_router(release_router)
-app.include_router(stream_router)
+def _include_public_routes(source_router: APIRouter) -> None:
+    """Mount only public routes from a mixed router.
+
+    Some legacy modules deliberately colocate read-only /v1 routes and authenticated /internal
+    operator routes. The public deployment gets a filtered router so internal paths are absent
+    from both request routing and generated OpenAPI documentation.
+    """
+    public_router = APIRouter()
+    for route in source_router.routes:
+        path = getattr(route, "path", "") or ""
+        if path == "/internal" or path.startswith("/internal/"):
+            continue
+        public_router.routes.append(route)
+    app.include_router(public_router)
+
+
+for _router in (
+    data_router,
+    curve_router,
+    changefeed_router,
+    ops_router,
+    history_router,
+    readiness_router,
+    release_router,
+    stream_router,
+):
+    _include_public_routes(_router)
