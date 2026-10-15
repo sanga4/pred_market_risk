@@ -5,6 +5,10 @@ source-native canonical identity, then auto-merges only cross-source pairs satis
 strict identity rule used by the prior mapper: exact normalized title, exact non-empty normalized
 resolution rules, and <=24h (or missing) deadline compatibility. A separate semantic watermark
 lets this lane run independently from slower review-candidate discovery.
+
+The implementation deliberately does not import mapping_v5/v6 because those compatibility
+modules patch predecessor METHOD_VERSION globals at import time. This lane owns its index and
+candidate-history writes so importing it cannot mutate another mapping generation.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import pyarrow as pa
 
@@ -22,13 +27,12 @@ import institutional_mapping as base
 import institutional_mapping_v2 as v2
 import institutional_mapping_v3 as v3
 import institutional_mapping_v4 as v4
-import institutional_mapping_v5 as v5
-import institutional_mapping_v6 as v6
 from db import connect
 
 METHOD_VERSION = "identity_mapping_v1_strict_exact"
 RECOVERY_VERSION = "identity_mapping_recovery_v1"
 RECOVERY_MINUTES = max(10, int(os.getenv("IDENTITY_MAPPING_RECOVERY_MINUTES", "30")))
+INDEX_BATCH_ROWS = max(1000, int(os.getenv("MAPPING_INDEX_BATCH_ROWS", "20000")))
 
 STATE_SCHEMA = pa.schema([
     ("source_contract_id", pa.string()),
@@ -38,6 +42,27 @@ STATE_SCHEMA = pa.schema([
     ("processed_at", pa.timestamp("us", tz="UTC")),
     ("last_pass_id", pa.string()),
 ])
+INDEX_SCHEMA = pa.schema([
+    ("source_contract_id", pa.string()),
+    ("source_id", pa.string()),
+    ("semantic_version_no", pa.int64()),
+    ("normalized_title", pa.string()),
+    ("normalized_rules", pa.string()),
+    ("deadline_at", pa.timestamp("us", tz="UTC")),
+    ("deadline_bucket", pa.string()),
+    ("meaningful_token_count", pa.int32()),
+    ("active", pa.bool_()),
+    ("indexed_at", pa.timestamp("us", tz="UTC")),
+    ("method_version", pa.string()),
+])
+TOKEN_SCHEMA = pa.schema([
+    ("source_contract_id", pa.string()),
+    ("source_id", pa.string()),
+    ("semantic_version_no", pa.int64()),
+    ("token", pa.string()),
+    ("method_version", pa.string()),
+    ("indexed_at", pa.timestamp("us", tz="UTC")),
+])
 
 
 def now_utc() -> datetime:
@@ -46,7 +71,9 @@ def now_utc() -> datetime:
 
 @contextmanager
 def _method_scope():
-    modules = [base, v2, v3, v4, v5, v6]
+    # v3's stable merge primitive stamps METHOD_VERSION. Save/restore every predecessor global
+    # touched by v4 so this lane is process-safe when used beside older modules in tests/tools.
+    modules = [base, v2, v3, v4]
     previous = [(module, getattr(module, "METHOD_VERSION", None)) for module in modules]
     try:
         for module, _ in previous:
@@ -61,6 +88,14 @@ def _method_scope():
 def _rows_dict(cur) -> list[dict]:
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def _arrow(rows: list[dict], schema: pa.Schema) -> pa.Table:
+    return pa.Table.from_pylist(rows, schema=schema) if rows else pa.Table.from_pylist([], schema=schema)
+
+
+def _deadline(row: dict) -> Optional[datetime]:
+    return row.get("resolves_at") or row.get("closes_at")
 
 
 def recover_abandoned_identity_passes(con) -> dict:
@@ -98,6 +133,125 @@ def _work_queue(con) -> list[dict]:
         FROM er_mapping_identity_work_queue
         ORDER BY source_id,source_contract_id
     """))
+
+
+def _index_payload(row: dict) -> tuple[dict, list[dict]]:
+    indexed_at = now_utc()
+    normalized_title = base.normalize(row.get("current_title") or "")
+    normalized_rules = v2.normalized_rules(row.get("current_resolution_rules"))
+    tokens = sorted(v2.meaningful_tokens(row.get("current_title") or ""))
+    deadline = _deadline(row)
+    index_row = {
+        "source_contract_id": row["source_contract_id"],
+        "source_id": row["source_id"],
+        "semantic_version_no": row.get("semantic_version_no"),
+        "normalized_title": normalized_title,
+        "normalized_rules": normalized_rules,
+        "deadline_at": deadline,
+        "deadline_bucket": v4._deadline_bucket(deadline),
+        "meaningful_token_count": len(tokens),
+        "active": True,
+        "indexed_at": indexed_at,
+        "method_version": METHOD_VERSION,
+    }
+    token_rows = [{
+        "source_contract_id": row["source_contract_id"],
+        "source_id": row["source_id"],
+        "semantic_version_no": row.get("semantic_version_no"),
+        "token": token,
+        "method_version": METHOD_VERSION,
+        "indexed_at": indexed_at,
+    } for token in tokens]
+    return index_row, token_rows
+
+
+def _upsert_index_batch(con, rows: list[dict]) -> dict:
+    if not rows:
+        return {"contracts": 0, "tokens": 0}
+    index_rows: list[dict] = []
+    token_rows: list[dict] = []
+    for row in rows:
+        index_row, tokens = _index_payload(row)
+        index_rows.append(index_row)
+        token_rows.extend(tokens)
+
+    con.register("_identity_index_arrow", _arrow(index_rows, INDEX_SCHEMA))
+    con.register("_identity_tokens_arrow", _arrow(token_rows, TOKEN_SCHEMA))
+    try:
+        con.execute("""
+            DELETE FROM er_mapping_token_index
+            WHERE source_contract_id IN (SELECT source_contract_id FROM _identity_index_arrow)
+        """)
+        con.execute("""
+            INSERT INTO er_mapping_contract_index(
+              source_contract_id,source_id,semantic_version_no,normalized_title,normalized_rules,
+              deadline_at,deadline_bucket,meaningful_token_count,active,indexed_at,method_version)
+            SELECT source_contract_id,source_id,semantic_version_no,normalized_title,normalized_rules,
+                   deadline_at,deadline_bucket,meaningful_token_count,active,indexed_at,method_version
+            FROM _identity_index_arrow
+            ON CONFLICT(source_contract_id) DO UPDATE SET
+              source_id=excluded.source_id,
+              semantic_version_no=excluded.semantic_version_no,
+              normalized_title=excluded.normalized_title,
+              normalized_rules=excluded.normalized_rules,
+              deadline_at=excluded.deadline_at,
+              deadline_bucket=excluded.deadline_bucket,
+              meaningful_token_count=excluded.meaningful_token_count,
+              active=TRUE,
+              indexed_at=excluded.indexed_at,
+              method_version=excluded.method_version
+        """)
+        if token_rows:
+            con.execute("""
+                INSERT INTO er_mapping_token_index(
+                  source_contract_id,source_id,semantic_version_no,token,method_version,indexed_at)
+                SELECT source_contract_id,source_id,semantic_version_no,token,method_version,indexed_at
+                FROM _identity_tokens_arrow
+                ON CONFLICT(source_contract_id,token) DO UPDATE SET
+                  source_id=excluded.source_id,
+                  semantic_version_no=excluded.semantic_version_no,
+                  method_version=excluded.method_version,
+                  indexed_at=excluded.indexed_at
+            """)
+    finally:
+        con.unregister("_identity_index_arrow")
+        con.unregister("_identity_tokens_arrow")
+    return {"contracts": len(index_rows), "tokens": len(token_rows)}
+
+
+def _seed_index_if_needed(con) -> dict:
+    existing = int(con.execute("SELECT count(*) FROM er_mapping_contract_index").fetchone()[0])
+    if existing:
+        return {"seeded": False, "contracts": 0, "tokens": 0, "existing": existing}
+    rows = _rows_dict(con.execute("""
+        SELECT c.source_contract_id,c.source_id,c.current_title,c.current_resolution_rules,
+               c.closes_at,c.resolves_at,s.version_no AS semantic_version_no
+        FROM er_source_contracts c
+        LEFT JOIN er_latest_contract_semantic_versions s USING(source_contract_id)
+        WHERE c.active=TRUE
+        ORDER BY c.source_id,c.source_contract_id
+    """))
+    total_contracts = 0
+    total_tokens = 0
+    for start in range(0, len(rows), INDEX_BATCH_ROWS):
+        result = _upsert_index_batch(con, rows[start:start + INDEX_BATCH_ROWS])
+        total_contracts += result["contracts"]
+        total_tokens += result["tokens"]
+    return {"seeded": True, "contracts": total_contracts, "tokens": total_tokens, "existing": 0}
+
+
+def _sync_inactive_index(con) -> int:
+    before = int(con.execute("SELECT count(*) FROM er_mapping_contract_index WHERE active=TRUE").fetchone()[0])
+    con.execute("""
+        UPDATE er_mapping_contract_index i SET active=FALSE,indexed_at=now()
+        WHERE i.active=TRUE
+          AND NOT EXISTS (
+            SELECT 1 FROM er_source_contracts c
+            WHERE c.source_contract_id=i.source_contract_id AND c.active=TRUE
+          )
+    """)
+    after = int(con.execute("SELECT count(*) FROM er_mapping_contract_index WHERE active=TRUE").fetchone()[0])
+    return max(0, before - after)
 
 
 def _register_changed_ids(con, rows: list[dict]) -> None:
@@ -182,6 +336,115 @@ def _exact_candidates(rows: list[dict]) -> list[dict]:
     return output
 
 
+def _persist_exact_candidates(con, rows: list[dict]) -> int:
+    if not rows:
+        return 0
+    table = pa.Table.from_pylist(rows)
+    con.register("_identity_candidates_arrow", table)
+    try:
+        # Preserve review/acceptance state of a prior semantic version before replacing the
+        # current pair-level representation.
+        con.execute("""
+            UPDATE er_mapping_candidate_versions v SET
+              status=c.status,review_action=c.review_action,review_notes=c.review_notes,
+              reviewed_by=c.reviewed_by,reviewed_at=c.reviewed_at,
+              review_relationship_type=c.review_relationship_type,review_direction=c.review_direction,
+              superseded_at=CASE
+                WHEN c.left_semantic_version_no IS DISTINCT FROM a.left_semantic_version_no
+                  OR c.right_semantic_version_no IS DISTINCT FROM a.right_semantic_version_no
+                THEN coalesce(v.superseded_at,now()) ELSE v.superseded_at END
+            FROM er_mapping_candidates c,_identity_candidates_arrow a
+            WHERE c.left_source_contract_id=a.left_source_contract_id
+              AND c.right_source_contract_id=a.right_source_contract_id
+              AND c.method_version=a.method_version
+              AND v.candidate_id=c.candidate_id
+              AND v.left_semantic_version_no IS NOT DISTINCT FROM c.left_semantic_version_no
+              AND v.right_semantic_version_no IS NOT DISTINCT FROM c.right_semantic_version_no
+        """)
+        before = int(con.execute(
+            "SELECT count(*) FROM er_mapping_candidate_versions WHERE method_version=?", [METHOD_VERSION]
+        ).fetchone()[0])
+        con.execute("""
+            INSERT INTO er_mapping_candidate_versions(
+              candidate_version_id,candidate_id,left_source_contract_id,right_source_contract_id,
+              left_semantic_version_no,right_semantic_version_no,suggested_relationship,
+              title_similarity,deadline_distance_hours,overall_confidence,candidate_method,method_version,
+              resolution_similarity,resolution_compatible,rules_available_both,status)
+            SELECT candidate_version_id,candidate_id,left_source_contract_id,right_source_contract_id,
+                   left_semantic_version_no,right_semantic_version_no,suggested_relationship,
+                   title_similarity,deadline_distance_hours,overall_confidence,candidate_method,method_version,
+                   resolution_similarity,resolution_compatible,rules_available_both,'pending'
+            FROM _identity_candidates_arrow
+            ON CONFLICT(candidate_version_id) DO NOTHING
+        """)
+        con.execute("""
+            DELETE FROM er_mapping_candidates c USING _identity_candidates_arrow a
+            WHERE c.left_source_contract_id=a.left_source_contract_id
+              AND c.right_source_contract_id=a.right_source_contract_id
+              AND c.method_version=a.method_version
+              AND (
+                c.left_semantic_version_no IS DISTINCT FROM a.left_semantic_version_no
+                OR c.right_semantic_version_no IS DISTINCT FROM a.right_semantic_version_no
+              )
+        """)
+        con.execute("""
+            INSERT INTO er_mapping_candidates(
+              candidate_id,left_source_contract_id,right_source_contract_id,suggested_relationship,
+              title_similarity,deadline_distance_hours,overall_confidence,candidate_method,method_version,
+              resolution_similarity,resolution_compatible,rules_available_both,
+              left_semantic_version_no,right_semantic_version_no,status)
+            SELECT candidate_id,left_source_contract_id,right_source_contract_id,suggested_relationship,
+                   title_similarity,deadline_distance_hours,overall_confidence,candidate_method,method_version,
+                   resolution_similarity,resolution_compatible,rules_available_both,
+                   left_semantic_version_no,right_semantic_version_no,'pending'
+            FROM _identity_candidates_arrow
+            ON CONFLICT DO NOTHING
+        """)
+        after = int(con.execute(
+            "SELECT count(*) FROM er_mapping_candidate_versions WHERE method_version=?", [METHOD_VERSION]
+        ).fetchone()[0])
+        return after - before
+    finally:
+        con.unregister("_identity_candidates_arrow")
+
+
+def _auto_accept_exact(con) -> int:
+    rows = con.execute("""
+        SELECT candidate_id,left_source_contract_id,right_source_contract_id,overall_confidence,
+               left_semantic_version_no,right_semantic_version_no
+        FROM er_mapping_candidates
+        WHERE status='pending' AND suggested_relationship='same_event'
+          AND title_similarity=1.0 AND resolution_compatible=TRUE AND rules_available_both=TRUE
+          AND (deadline_distance_hours IS NULL OR deadline_distance_hours<=24)
+          AND overall_confidence>=0.98 AND method_version=?
+        ORDER BY left_source_contract_id,right_source_contract_id
+    """, [METHOD_VERSION]).fetchall()
+    accepted = 0
+    for candidate_id,left_id,right_id,confidence,left_version,right_version in rows:
+        result = v3._merge_right_into_left(
+            con,left_id,right_id,confidence,"system","auto_exact",
+            "Exact normalized title, deadline and resolution rules matched across sources",
+            "strict_cross_source_auto",
+        )
+        con.execute("""
+            UPDATE er_mapping_candidates SET
+              status='auto_accepted',review_action='same_event',reviewed_by='system',reviewed_at=now(),
+              review_relationship_type=NULL,review_direction=NULL
+            WHERE candidate_id=?
+        """, [candidate_id])
+        con.execute("""
+            UPDATE er_mapping_candidate_versions SET
+              status='auto_accepted',review_action='same_event',reviewed_by='system',reviewed_at=now(),
+              review_relationship_type=NULL,review_direction=NULL
+            WHERE candidate_id=?
+              AND left_semantic_version_no IS NOT DISTINCT FROM ?
+              AND right_semantic_version_no IS NOT DISTINCT FROM ?
+        """, [candidate_id,left_version,right_version])
+        if result["changed"]:
+            accepted += 1
+    return accepted
+
+
 def _mark_processed(con, changed_rows: list[dict], pass_id: str) -> None:
     if not changed_rows:
         return
@@ -233,11 +496,10 @@ def run_identity_pass() -> dict:
                 bootstrap_seconds = time.monotonic() - t0
 
                 t0 = time.monotonic()
-                v5._seed_index_if_needed(con)
-                v5._sync_inactive_index(con)
+                seed = _seed_index_if_needed(con)
+                inactive = _sync_inactive_index(con)
                 changed_rows = _work_queue(con)
-                if changed_rows:
-                    v5._upsert_index_batch(con, changed_rows)
+                indexed = _upsert_index_batch(con, changed_rows) if changed_rows else {"contracts": 0,"tokens": 0}
                 indexing_seconds = time.monotonic() - t0
 
                 t0 = time.monotonic()
@@ -246,8 +508,8 @@ def run_identity_pass() -> dict:
                 candidate_seconds = time.monotonic() - t0
 
                 t0 = time.monotonic()
-                inserted = v6._persist_candidates(con, exact_candidates)
-                accepted = v6._auto_accept_exact(con)
+                inserted = _persist_exact_candidates(con, exact_candidates)
+                accepted = _auto_accept_exact(con)
                 _mark_processed(con, changed_rows, pass_id)
                 persistence_seconds = time.monotonic() - t0
 
@@ -256,6 +518,9 @@ def run_identity_pass() -> dict:
                 "deterministic_identity_only": True,
                 "fuzzy_review_candidates_excluded": True,
                 "native_bootstrap": native,
+                "index_seed": seed,
+                "indexed_changes": indexed,
+                "inactive_index_rows": inactive,
                 "recovery": recovery,
                 "timing": {
                     "bootstrap_seconds": round(bootstrap_seconds, 6),
