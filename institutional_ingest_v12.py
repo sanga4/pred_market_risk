@@ -8,7 +8,9 @@ immutable raw lineage, CDC, semantic versioning and presence semantics.
 
 Only one extra source chunk is retained in memory. No source writes occur concurrently. Source
 HTTP calls use the thread-local retry client so current-source prefetch and next-source priming do
-not share a requests.Session across threads.
+not share a requests.Session across threads. Priming is performance-only: a priming error falls
+back to an ordinary v11 source run, so optimization failures cannot bypass the ingestion ledger or
+change source-validity semantics.
 """
 
 from __future__ import annotations
@@ -102,6 +104,17 @@ def _ingest_with_prime(source_id: str, primed: PrimedSource | None) -> dict:
     return result
 
 
+def _failed_result(source_id: str, exc: Exception, *, phase: str) -> dict:
+    return {
+        "source_id": source_id,
+        "status": "failed",
+        "phase": phase,
+        "error": str(exc),
+        "writer": v11.METHOD_VERSION,
+        "orchestration": {"method_version": ORCHESTRATION_VERSION},
+    }
+
+
 def run_once(source_ids=None) -> list[dict]:
     source_ids = list(source_ids or v11.ADAPTERS)
     results: list[dict] = []
@@ -129,30 +142,30 @@ def run_once(source_ids=None) -> list[dict]:
             primer.start()
 
         if pending_error is not None:
-            results.append(
-                {
-                    "source_id": source_id,
-                    "status": "failed",
-                    "phase": "cross_source_prime",
-                    "error": str(pending_error),
-                    "writer": v11.METHOD_VERSION,
-                    "orchestration": {"method_version": ORCHESTRATION_VERSION},
-                }
+            # Priming is not authoritative collection. Retry through the proven v11 path so a real
+            # source failure is recorded in er_ingestion_runs/source health rather than being an
+            # orchestration-only failure with no data-plane ledger row.
+            log.warning(
+                "cross-source prime failed source=%s error=%s; falling back to ordinary v11 ingestion",
+                source_id,
+                pending_error,
             )
+            try:
+                result = _ingest_with_prime(source_id, None)
+                result["orchestration"].update(
+                    {
+                        "prime_fallback": True,
+                        "prime_error": str(pending_error)[:500],
+                    }
+                )
+                results.append(result)
+            except Exception as exc:
+                results.append(_failed_result(source_id, exc, phase="source"))
         else:
             try:
                 results.append(_ingest_with_prime(source_id, pending_prime))
             except Exception as exc:
-                results.append(
-                    {
-                        "source_id": source_id,
-                        "status": "failed",
-                        "phase": "source",
-                        "error": str(exc),
-                        "writer": v11.METHOD_VERSION,
-                        "orchestration": {"method_version": ORCHESTRATION_VERSION},
-                    }
-                )
+                results.append(_failed_result(source_id, exc, phase="source"))
 
         pending_prime = None
         pending_error = None
