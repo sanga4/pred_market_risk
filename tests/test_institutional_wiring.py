@@ -11,7 +11,7 @@ def test_all_runtime_migration_paths_use_shared_ledger():
     base_runner = text("institutional_migrations.py")
     extension_runner = text("institutional_migrations_v2.py")
     assert '"institutional_schema_025.sql"' in base_runner
-    for migration in range(26, 36):
+    for migration in range(26, 38):
         assert f'"institutional_schema_{migration:03d}.sql"' in extension_runner
     assert "er_schema_migrations" in base_runner
     assert "er_schema_migrations" in extension_runner
@@ -27,11 +27,11 @@ def test_all_runtime_migration_paths_use_shared_ledger():
         )
 
 
-def test_hot_runtime_uses_promoted_v10_identity_pipeline_only():
+def test_hot_runtime_uses_promoted_v11_identity_pipeline_only():
     for name in ["institutional_service.py", "institutional_worker.py"]:
         body = text(name)
         assert "from institutional_archive_v2 import archive_pending" in body
-        assert "from institutional_ingest_v10 import run_once" in body
+        assert "from institutional_ingest_v11 import run_once" in body
         assert "from institutional_mapping_identity_v1 import run_identity_pass" in body
         assert "evaluate_observed_readiness" in body
         assert "evaluate_identity_readiness" in body
@@ -39,7 +39,9 @@ def test_hot_runtime_uses_promoted_v10_identity_pipeline_only():
         assert "RAW_ARCHIVE_MAX_ROWS" in body
         assert "RAW_ARCHIVE_BATCH_SIZE" in body
         assert '"timing_seconds"' in body
+        assert "hot_path_v2_v11_identity" in body
         for forbidden in [
+            "from institutional_ingest_v10 import run_once",
             "institutional_mapping_v8", "institutional_mapping_v7", "institutional_mapping_v6",
             "institutional_ontology_v2", "institutional_graph_v3",
             "institutional_mapping_drift_v2", "institutional_reference_versions_v2",
@@ -63,6 +65,7 @@ def test_enrichment_runtime_owns_advisory_normalization_and_full_qa():
     ]:
         assert required in body
     assert "institutional_ingest_v10" not in body
+    assert "institutional_ingest_v11" not in body
     assert "institutional_mapping_identity_v1" not in body
 
 
@@ -97,7 +100,7 @@ def test_v8_runtime_uses_direct_temp_persistence_and_set_based_presence():
     assert "BEGIN TRANSACTION" in body and "ROLLBACK" in body
 
 
-def test_ingest_v9_remains_historical_after_v10_promotion():
+def test_ingest_v9_remains_historical_after_v11_promotion():
     body = text("institutional_ingest_v9.py")
     presence = text("institutional_presence_v3.py")
     schema31 = text("institutional_schema_031.sql")
@@ -125,7 +128,7 @@ def test_identity_mapping_lane_is_promoted_to_hot_runtime_and_excludes_fuzzy():
     assert "institutional_mapping_identity_v1" not in text("institutional_enrichment_worker.py")
 
 
-def test_ingest_v10_current_state_pointers_are_promoted_to_hot_runtime():
+def test_ingest_v10_current_state_pointers_remain_v11_base_not_runtime_entrypoint():
     body = text("institutional_ingest_v10.py")
     schema33 = text("institutional_schema_033.sql")
     for value in ["er_raw_current_snapshots", "er_market_current_state", "change_data_capture_v10_stateful"]:
@@ -134,9 +137,20 @@ def test_ingest_v10_current_state_pointers_are_promoted_to_hot_runtime():
     assert "LEFT JOIN er_market_current_state" in body
     assert "er_latest_market_observations" not in body
     assert "collect_seen_ids=False" in body
-    assert "from institutional_ingest_v10 import run_once" in text("institutional_worker.py")
-    assert "from institutional_ingest_v10 import run_once" in text("institutional_service.py")
+    assert "from institutional_ingest_v10 import run_once" not in text("institutional_worker.py")
+    assert "from institutional_ingest_v10 import run_once" not in text("institutional_service.py")
     assert "institutional_ingest_v10" not in text("institutional_enrichment_worker.py")
+    assert "import institutional_ingest_v10 as v10" in text("institutional_ingest_v11.py")
+
+
+def test_ingest_v11_bounded_prefetch_is_promoted_to_hot_runtime():
+    body = text("institutional_ingest_v11.py")
+    schema36 = text("institutional_schema_036.sql")
+    for value in ["change_data_capture_v11_prefetched", "queue.Queue(maxsize=1)", "streamed_state_pointer_cdc_prefetch1"]:
+        assert value in body or value in schema36
+    assert "from institutional_ingest_v11 import run_once" in text("institutional_worker.py")
+    assert "from institutional_ingest_v11 import run_once" in text("institutional_service.py")
+    assert "institutional_ingest_v11" not in text("institutional_enrichment_worker.py")
 
 
 def test_layered_readiness_is_registered_and_api_exposes_each_lane():
@@ -152,10 +166,12 @@ def test_layered_readiness_is_registered_and_api_exposes_each_lane():
         assert path in api
 
 
-def test_layered_runtime_topology_is_registered():
+def test_layered_runtime_topology_is_registered_and_v11_promoted():
     schema35 = text("institutional_schema_035.sql")
     for value in ["hot_path_v1_v10_identity", "enrichment_path_v1_async", "institutional_enrichment_worker.py"]:
         assert value in schema35
+    schema37 = text("institutional_schema_037.sql")
+    assert "hot_path_v2_v11_identity" in schema37
 
 
 def test_ops_review_uses_current_serving_mapping_semantics():
@@ -282,6 +298,12 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
     schema35 = text("institutional_schema_035.sql")
     for value in ["hot_path_v1_v10_identity", "enrichment_path_v1_async"]:
         assert value in schema35
+
+    schema36 = text("institutional_schema_036.sql")
+    assert "change_data_capture_v11_prefetched" in schema36
+
+    schema37 = text("institutional_schema_037.sql")
+    assert "hot_path_v2_v11_identity" in schema37
 
 
 def test_raw_bundle_schema_exists():
