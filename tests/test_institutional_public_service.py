@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import institutional_public_service as service
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -24,26 +26,29 @@ def test_public_service_is_stateless_and_has_no_write_side_startup():
     assert "source collection is owned by MotherDuck Flights" in body
 
 
-def test_public_service_blocks_internal_control_plane_routes():
+def test_public_service_blocks_and_excludes_internal_control_plane_routes():
     body = text("institutional_public_service.py")
     assert 'request.url.path.startswith("/internal/")' in body
     assert 'status_code=404' in body
-    assert "institutional_ops_api" in body
-    assert "institutional_admin_api" in body
+    assert "_include_public_routes" in body
+
+    paths = set(service.app.openapi()["paths"])
+    assert not any(path == "/internal" or path.startswith("/internal/") for path in paths)
 
 
-def test_public_service_exposes_investor_data_surfaces():
+def test_public_service_runtime_exposes_investor_data_surfaces():
+    paths = set(service.app.openapi()["paths"])
+    expected = {
+        "/v1/events",
+        "/v1/change-feed",
+        "/v1/readiness",
+        "/v1/sources",
+        "/v1/quality",
+        "/v1/releases",
+        "/v1/stream",
+    }
+    assert expected <= paths
+
     body = text("institutional_public_service.py")
-    for router in [
-        "data_router",
-        "curve_router",
-        "changefeed_router",
-        "ops_router",
-        "history_router",
-        "readiness_router",
-        "release_router",
-        "stream_router",
-    ]:
-        assert f"app.include_router({router})" in body
     assert 'X-EventRisk-Decision-Boundary' in body
     assert '"mode": "stateless-read-api"' in body
