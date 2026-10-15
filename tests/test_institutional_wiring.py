@@ -15,6 +15,7 @@ def test_all_runtime_migration_paths_use_shared_ledger():
     assert '"institutional_schema_027.sql"' in extension_runner
     assert '"institutional_schema_028.sql"' in extension_runner
     assert '"institutional_schema_029.sql"' in extension_runner
+    assert '"institutional_schema_030.sql"' in extension_runner
     assert "er_schema_migrations" in base_runner
     assert "er_schema_migrations" in extension_runner
     assert "ensure_base_schema" in extension_runner
@@ -56,6 +57,16 @@ def test_mapping_v7_is_registered_and_staged_worker_only_for_acceptance():
     assert "python_meaningful_tokens_v1" in body
     assert "from institutional_mapping_v7 import run_mapping_pass" in text("institutional_worker.py")
     assert "from institutional_mapping_v6 import run_mapping_pass" in text("institutional_service.py")
+
+
+def test_mapping_v8_is_registered_but_not_promoted_before_acceptance():
+    body = text("institutional_mapping_v8.py")
+    schema30 = text("institutional_schema_030.sql")
+    assert "mapping_rules_v8_changed_token_frequency" in body
+    assert "mapping_rules_v8_changed_token_frequency" in schema30
+    assert "frequency_scope" in body and "changed_tokens_only" in body
+    assert "from institutional_mapping_v8 import run_mapping_pass" not in text("institutional_worker.py")
+    assert "from institutional_mapping_v8 import run_mapping_pass" not in text("institutional_service.py")
 
 
 def test_v8_runtime_uses_direct_temp_persistence_and_set_based_presence():
@@ -169,6 +180,9 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
 
     schema29 = text("institutional_schema_029.sql")
     assert "mapping_rules_v7_python_overlap" in schema29
+
+    schema30 = text("institutional_schema_030.sql")
+    assert "mapping_rules_v8_changed_token_frequency" in schema30
 
 
 def test_raw_bundle_schema_exists():
