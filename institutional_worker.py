@@ -12,7 +12,7 @@ import os
 import time
 
 from institutional_archive_v2 import archive_pending
-from institutional_ingest_v10 import run_once
+from institutional_ingest_v11 import run_once
 from institutional_mapping_identity_v1 import run_identity_pass
 from institutional_migrations_v2 import ensure_schema
 from institutional_readiness_v4 import evaluate_identity_readiness, evaluate_observed_readiness
@@ -71,7 +71,7 @@ def cycle() -> dict:
         "observed_readiness": observed_readiness,
         "identity_readiness": identity_readiness,
         "timing_seconds": timings,
-        "runtime_topology": "hot_path_v1_v10_identity",
+        "runtime_topology": "hot_path_v2_v11_identity",
     }
 
 
