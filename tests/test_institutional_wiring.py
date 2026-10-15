@@ -11,7 +11,7 @@ def test_all_runtime_migration_paths_use_shared_ledger():
     base_runner = text("institutional_migrations.py")
     extension_runner = text("institutional_migrations_v2.py")
     assert '"institutional_schema_025.sql"' in base_runner
-    for migration in range(26, 32):
+    for migration in range(26, 33):
         assert f'"institutional_schema_{migration:03d}.sql"' in extension_runner
     assert "er_schema_migrations" in base_runner
     assert "er_schema_migrations" in extension_runner
@@ -88,6 +88,18 @@ def test_ingest_v9_is_registered_but_not_promoted_before_acceptance():
     assert "collect_seen_ids=False" in body
     assert "from institutional_ingest_v9 import run_once" not in text("institutional_worker.py")
     assert "from institutional_ingest_v9 import run_once" not in text("institutional_service.py")
+
+
+def test_identity_mapping_lane_is_registered_and_separate_from_fuzzy_runtime():
+    body = text("institutional_mapping_identity_v1.py")
+    schema32 = text("institutional_schema_032.sql")
+    for value in ["identity_mapping_v1_strict_exact", "er_mapping_identity_state", "er_mapping_identity_work_queue"]:
+        assert value in body or value in schema32
+    assert "fuzzy_review_candidates_excluded" in body
+    assert "normalized_title=l.normalized_title" in body
+    assert "normalized_rules=l.normalized_rules" in body
+    assert "from institutional_mapping_identity_v1" not in text("institutional_worker.py")
+    assert "from institutional_mapping_identity_v1" not in text("institutional_service.py")
 
 
 def test_ops_review_uses_current_serving_mapping_semantics():
@@ -199,6 +211,10 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
     schema31 = text("institutional_schema_031.sql")
     for value in ["change_data_capture_v9_streamed", "presence_reconciliation_v3_staged_seen"]:
         assert value in schema31
+
+    schema32 = text("institutional_schema_032.sql")
+    for value in ["er_mapping_identity_state", "er_mapping_identity_work_queue", "identity_mapping_v1_strict_exact"]:
+        assert value in schema32
 
 
 def test_raw_bundle_schema_exists():
