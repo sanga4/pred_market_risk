@@ -9,6 +9,18 @@ def text(name: str) -> str:
     return (ROOT / name).read_text()
 
 
+def route_paths(routes):
+    paths = []
+    for route in routes:
+        path = getattr(route, "path", None)
+        if path:
+            paths.append(path)
+        nested = getattr(route, "routes", None)
+        if nested:
+            paths.extend(route_paths(nested))
+    return paths
+
+
 def test_public_service_is_stateless_and_has_no_write_side_startup():
     body = text("institutional_public_service.py")
     forbidden = [
@@ -32,22 +44,24 @@ def test_public_service_blocks_and_excludes_internal_control_plane_routes():
     assert 'status_code=404' in body
     assert "_include_public_routes" in body
 
-    paths = set(service.app.openapi()["paths"])
+    paths = set(route_paths(service.app.routes))
     assert not any(path == "/internal" or path.startswith("/internal/") for path in paths)
 
 
-def test_public_service_runtime_exposes_investor_data_surfaces():
-    paths = set(service.app.openapi()["paths"])
-    expected = {
+def test_public_service_runtime_exposes_investor_http_and_websocket_surfaces():
+    http_paths = set(service.app.openapi()["paths"])
+    expected_http = {
         "/v1/events",
         "/v1/change-feed",
         "/v1/readiness",
         "/v1/sources",
         "/v1/quality",
         "/v1/releases",
-        "/v1/stream",
     }
-    assert expected <= paths
+    assert expected_http <= http_paths
+
+    all_paths = set(route_paths(service.app.routes))
+    assert "/v1/stream" in all_paths
 
     body = text("institutional_public_service.py")
     assert 'X-EventRisk-Decision-Boundary' in body
