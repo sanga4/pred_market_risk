@@ -323,7 +323,11 @@ def evaluate_enrichment_readiness() -> dict:
     con = connect(read_only=True)
     try:
         tables = _table_names(con)
-        required = {"er_mapping_passes", "er_ontology_runs", "er_graph_runs", "er_graph_edges"}
+        required = {
+            "er_mapping_passes", "er_ontology_runs", "er_graph_runs", "er_graph_edges",
+            "er_graph_edge_origins", "er_edge_evidence", "er_event_relationships",
+            "er_event_relationship_evidence",
+        }
         missing = sorted(required - tables)
         controls.append(_control(
             "enrichment_schema_complete", not missing, "critical",
@@ -356,15 +360,23 @@ def evaluate_enrichment_readiness() -> dict:
         ])
 
         graph_bad = int(con.execute("""
-            SELECT count(*) FROM er_graph_edges
-            WHERE valid_to IS NULL AND (
-              provenance_source IS NULL OR evidence_id IS NULL OR method_version IS NULL
-              OR (edge_class='inferred' AND (confidence IS NULL OR inference_method IS NULL))
+            WITH evidence AS (
+              SELECT edge_id,count(*)::BIGINT AS evidence_count
+              FROM er_edge_evidence
+              GROUP BY edge_id
+            )
+            SELECT count(*)
+            FROM er_graph_edges g
+            LEFT JOIN er_graph_edge_origins o USING(edge_id)
+            LEFT JOIN evidence e USING(edge_id)
+            WHERE g.valid_to IS NULL AND (
+              o.edge_id IS NULL OR coalesce(e.evidence_count,0)=0 OR g.method_version IS NULL
+              OR (g.edge_class='inferred' AND (g.confidence IS NULL OR g.inference_method IS NULL))
             )
         """).fetchone()[0])
         controls.append(_control(
             "current_graph_edges_have_provenance", graph_bad == 0, "critical",
-            "Every current graph edge has source/evidence/version provenance; inferred edges also carry confidence and inference method",
+            "Every current graph edge has interval-origin/evidence/version provenance; inferred edges also carry confidence and inference method",
             graph_bad, 0,
         ))
 
