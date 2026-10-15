@@ -1,4 +1,4 @@
-from institutional_migrations import ensure_schema
+from institutional_migrations_v2 import ensure_schema
 
 
 def main():
