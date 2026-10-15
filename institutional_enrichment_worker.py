@@ -18,7 +18,7 @@ from institutional_mapping_v8 import run_mapping_pass
 from institutional_migrations_v2 import ensure_schema
 from institutional_ontology_v2 import run_ontology_pass
 from institutional_qa_v4 import run_qa
-from institutional_readiness_v4 import evaluate_enrichment_readiness
+from institutional_readiness_v5 import evaluate_enrichment_readiness
 from institutional_reference_versions_v2 import sync_reference_versions
 
 log = logging.getLogger("eventrisk.enrichment_worker")
