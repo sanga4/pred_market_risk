@@ -7,9 +7,9 @@ def text(name: str) -> str:
     return (ROOT / name).read_text()
 
 
-def test_extension_migration_ledger_registers_every_schema_through_047():
+def test_extension_migration_ledger_registers_every_schema_through_048():
     body = text("institutional_migrations_v2.py")
-    for migration in range(26, 48):
+    for migration in range(26, 49):
         assert f'"institutional_schema_{migration:03d}.sql"' in body
         assert (ROOT / f"institutional_schema_{migration:03d}.sql").exists()
 
@@ -34,3 +34,15 @@ def test_hot_worker_v5_is_singleflight_and_uses_readiness_v6():
     assert "hot_path_v5_v11_identity_singleflight_readiness6" in body
     assert "institutional_readiness_v6_started_run_basis" in schema46
     assert "hot_path_v5_v11_identity_singleflight_readiness6" in schema47
+
+
+def test_enrichment_worker_v5_uses_snapshot_safe_qa_v8():
+    worker = text("institutional_enrichment_worker_v5.py")
+    qa = text("institutional_qa_v8.py")
+    schema48 = text("institutional_schema_048.sql")
+    assert "from institutional_qa_v8 import run_qa" in worker
+    assert "ENRICHMENT_CORE_STABILITY_WAIT_SECONDS" in worker
+    assert "enrichment_path_v5_snapshot_guarded_qa" in worker
+    assert "identity_snapshot_state" in qa
+    assert "check_latest_completed_full_universe_runs" in qa
+    assert "institutional_qa_v8_snapshot_guard_completed_runs" in schema48
