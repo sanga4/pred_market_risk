@@ -11,7 +11,7 @@ def test_all_runtime_migration_paths_use_shared_ledger():
     base_runner = text("institutional_migrations.py")
     extension_runner = text("institutional_migrations_v2.py")
     assert '"institutional_schema_025.sql"' in base_runner
-    for migration in range(26, 38):
+    for migration in range(26, 39):
         assert f'"institutional_schema_{migration:03d}.sql"' in extension_runner
     assert "er_schema_migrations" in base_runner
     assert "er_schema_migrations" in extension_runner
@@ -54,7 +54,7 @@ def test_enrichment_runtime_owns_advisory_normalization_and_full_qa():
     body = text("institutional_enrichment_worker.py")
     for required in [
         "from institutional_mapping_v8 import run_mapping_pass",
-        "from institutional_lifecycle import sync_event_lifecycle",
+        "from institutional_lifecycle_v2 import sync_event_lifecycle",
         "from institutional_ontology_v2 import run_ontology_pass",
         "from institutional_graph_v3 import run_graph_pass",
         "from institutional_reference_versions_v2 import sync_reference_versions",
@@ -64,6 +64,7 @@ def test_enrichment_runtime_owns_advisory_normalization_and_full_qa():
         "enrichment_path_v1_async",
     ]:
         assert required in body
+    assert "from institutional_lifecycle import sync_event_lifecycle" not in body
     assert "institutional_ingest_v10" not in body
     assert "institutional_ingest_v11" not in body
     assert "institutional_mapping_identity_v1" not in body
@@ -151,6 +152,18 @@ def test_ingest_v11_bounded_prefetch_is_promoted_to_hot_runtime():
     assert "from institutional_ingest_v11 import run_once" in text("institutional_worker.py")
     assert "from institutional_ingest_v11 import run_once" in text("institutional_service.py")
     assert "institutional_ingest_v11" not in text("institutional_enrichment_worker.py")
+
+
+def test_lifecycle_v2_is_set_based_and_promoted_only_to_enrichment():
+    body = text("institutional_lifecycle_v2.py")
+    schema38 = text("institutional_schema_038.sql")
+    assert "canonical_lifecycle_v2_set_based" in body
+    assert "canonical_lifecycle_v2_set_based" in schema38
+    assert "GROUP BY m.canonical_event_id" in body
+    assert "BEGIN TRANSACTION" in body and "ROLLBACK" in body
+    assert "from institutional_lifecycle_v2 import sync_event_lifecycle" in text("institutional_enrichment_worker.py")
+    assert "institutional_lifecycle_v2" not in text("institutional_worker.py")
+    assert "institutional_lifecycle_v2" not in text("institutional_service.py")
 
 
 def test_layered_readiness_is_registered_and_api_exposes_each_lane():
@@ -304,6 +317,9 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
 
     schema37 = text("institutional_schema_037.sql")
     assert "hot_path_v2_v11_identity" in schema37
+
+    schema38 = text("institutional_schema_038.sql")
+    assert "canonical_lifecycle_v2_set_based" in schema38
 
 
 def test_raw_bundle_schema_exists():
