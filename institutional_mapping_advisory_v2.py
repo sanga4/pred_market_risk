@@ -11,20 +11,61 @@ The warehouse is used to:
 - persist the compact candidate/history/state result.
 
 Token-frequency counting, rare-token ranking, pair construction and overlap filtering execute in
-Python on the enrichment Flight. This is advisory only: native canonical bootstrap and automatic
-same-event identity merges remain disabled. Deterministic identity is owned exclusively by
-``institutional_mapping_identity_v1``.
+Python on the enrichment Flight. This module's local pair helper deliberately imports *no*
+historical mapping generation: importing/testing the helper must not mutate those modules'
+compatibility globals. Production orchestration imports the historical generation lazily only
+inside the isolated advisory process.
+
+This is advisory only: native canonical bootstrap and automatic same-event identity merges remain
+disabled. Deterministic identity is owned exclusively by ``institutional_mapping_identity_v1``.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
+import os
 from typing import Iterable
 
 import pyarrow as pa
 
 ADVISORY_EXECUTION_VERSION = "mapping_advisory_v2_local_pair_discovery"
 _FETCH_BATCH_ROWS = 50_000
+MAX_BLOCK_MEMBERS = max(25, int(os.getenv("MAPPING_MAX_BLOCK_MEMBERS", "250")))
+MAX_BLOCK_TOKENS = max(1, int(os.getenv("MAPPING_MAX_BLOCK_TOKENS", "5")))
+_GENERIC_TOKENS = {
+    "market", "price", "above", "below", "more", "less", "than", "happen", "occur",
+    "reach", "yes", "no", "win", "between", "end", "year", "month", "day",
+}
+_CHANGED_ID_SCHEMA = pa.schema([("source_contract_id", pa.string())])
+
+
+def _meaningful_tokens_from_index_title(normalized_title: str) -> set[str]:
+    """Match mapping-v2 token filtering for titles already normalized in the persisted index."""
+    return {
+        token
+        for token in set((normalized_title or "").split())
+        if len(token) >= 3 and token not in _GENERIC_TOKENS
+    }
+
+
+def _rows_dict(cursor) -> list[dict]:
+    columns = [description[0] for description in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def _register_changed_ids(con, changed_rows: list[dict]) -> None:
+    table = pa.Table.from_pylist(
+        [{"source_contract_id": str(row["source_contract_id"])} for row in changed_rows],
+        schema=_CHANGED_ID_SCHEMA,
+    )
+    con.register("_advisory_changed_ids_arrow", table)
+    try:
+        con.execute(
+            "CREATE OR REPLACE TEMP TABLE _mapping_changed_ids AS "
+            "SELECT * FROM _advisory_changed_ids_arrow"
+        )
+    finally:
+        con.unregister("_advisory_changed_ids_arrow")
 
 
 def _rows_batched(cursor, batch_rows: int = _FETCH_BATCH_ROWS) -> Iterable[tuple]:
@@ -36,14 +77,13 @@ def _rows_batched(cursor, batch_rows: int = _FETCH_BATCH_ROWS) -> Iterable[tuple
 
 
 def _candidate_pair_rows_local(con, changed_rows: list[dict]) -> tuple[list[dict], dict]:
-    """Build the exact v8 candidate-pair input without remote pair materialization.
+    """Build mapping-v8-equivalent candidate-pair input without remote pair materialization.
 
     The rarity threshold, max blocking tokens, exact-title/deadline block, opposite-source rule,
     pair de-duplication and meaningful-token overlap threshold intentionally match mapping v8.
+    The persisted mapping index is already normalized; therefore no mapping-generation module is
+    required to interpret it.
     """
-    import institutional_mapping_v2 as meaning
-    import institutional_mapping_v5 as v5
-
     if not changed_rows:
         return [], {
             "pairs_blocked": 0,
@@ -57,9 +97,9 @@ def _candidate_pair_rows_local(con, changed_rows: list[dict]) -> tuple[list[dict
             "remote_metadata_rows_fetched": 0,
         }
 
-    v5._register_changed_ids(con, changed_rows)
+    _register_changed_ids(con, changed_rows)
 
-    index_rows = v5._rows_dict(con.execute("""
+    index_rows = _rows_dict(con.execute("""
         SELECT i.source_contract_id,i.source_id,i.semantic_version_no,i.normalized_title,
                i.normalized_rules,i.deadline_at,i.deadline_bucket,i.meaningful_token_count
         FROM er_mapping_contract_index i
@@ -97,15 +137,16 @@ def _candidate_pair_rows_local(con, changed_rows: list[dict]) -> tuple[list[dict
                 JOIN _advisory_changed_tokens_arrow x USING(token)
                 JOIN er_mapping_contract_index i USING(source_contract_id)
                 WHERE i.active=TRUE
+                ORDER BY t.token,t.source_contract_id
             """)
             for source_contract_id, source_id, token in _rows_batched(cur):
                 remote_token_rows += 1
                 token = str(token)
                 token_frequency[token] += 1
                 frequency = token_frequency[token]
-                if frequency <= v5.MAX_BLOCK_MEMBERS:
+                if frequency <= MAX_BLOCK_MEMBERS:
                     token_members[token].append((str(source_contract_id), str(source_id)))
-                elif frequency == v5.MAX_BLOCK_MEMBERS + 1:
+                elif frequency == MAX_BLOCK_MEMBERS + 1:
                     # The token can no longer participate in rare-token blocking. Drop retained
                     # members immediately so common tokens cannot dominate Flight memory.
                     token_members.pop(token, None)
@@ -142,6 +183,7 @@ def _candidate_pair_rows_local(con, changed_rows: list[dict]) -> tuple[list[dict
                   ON k.normalized_title=i.normalized_title
                  AND k.deadline_bucket=i.deadline_bucket
                 WHERE i.active=TRUE
+                ORDER BY i.normalized_title,i.deadline_bucket,i.source_contract_id
             """)):
                 exact_members[(str(title), str(bucket))].append((str(contract_id), str(source_id)))
         finally:
@@ -161,10 +203,10 @@ def _candidate_pair_rows_local(con, changed_rows: list[dict]) -> tuple[list[dict
             (
                 (token_frequency[token], token)
                 for token in changed_tokens_by_id.get(contract_id, set())
-                if 0 < token_frequency[token] <= v5.MAX_BLOCK_MEMBERS
+                if 0 < token_frequency[token] <= MAX_BLOCK_MEMBERS
             ),
             key=lambda item: (item[0], item[1]),
-        )[: v5.MAX_BLOCK_TOKENS]
+        )[:MAX_BLOCK_TOKENS]
         for _frequency, token in ranked_tokens:
             for partner_id, partner_source in token_members.get(token, []):
                 if partner_id == contract_id or partner_source == source_id:
@@ -188,11 +230,11 @@ def _candidate_pair_rows_local(con, changed_rows: list[dict]) -> tuple[list[dict
     pair_contract_ids = sorted({contract_id for pair in pair_ids for contract_id in pair})
     ids_table = pa.Table.from_pylist(
         [{"source_contract_id": contract_id} for contract_id in pair_contract_ids],
-        schema=pa.schema([("source_contract_id", pa.string())]),
+        schema=_CHANGED_ID_SCHEMA,
     )
     con.register("_advisory_pair_contracts_arrow", ids_table)
     try:
-        metadata_rows = v5._rows_dict(con.execute("""
+        metadata_rows = _rows_dict(con.execute("""
             SELECT i.source_contract_id,i.source_id,i.semantic_version_no,i.normalized_title,
                    i.normalized_rules,i.deadline_at,i.meaningful_token_count
             FROM er_mapping_contract_index i
@@ -211,8 +253,8 @@ def _candidate_pair_rows_local(con, changed_rows: list[dict]) -> tuple[list[dict
             continue
         if left["source_id"] == right["source_id"]:
             continue
-        left_tokens = meaning.meaningful_tokens(left.get("normalized_title") or "")
-        right_tokens = meaning.meaningful_tokens(right.get("normalized_title") or "")
+        left_tokens = _meaningful_tokens_from_index_title(left.get("normalized_title") or "")
+        right_tokens = _meaningful_tokens_from_index_title(right.get("normalized_title") or "")
         required_shared = 1 if min(len(left_tokens), len(right_tokens)) <= 2 else 2
         shared_count = len(left_tokens & right_tokens)
         if shared_count < required_shared:
@@ -289,7 +331,9 @@ def _stamp_execution_provenance(pass_id: str, result: dict) -> None:
 
 
 def run_mapping_pass() -> dict:
-    # Imports are local because historical mapping generations use compatibility hooks.
+    # Imports are local because historical mapping generations use compatibility hooks. This
+    # function is called only inside the isolated enrichment worker process; helper imports/tests
+    # above do not touch those globals.
     import institutional_mapping_v3 as v3
     import institutional_mapping_v4 as v4
     import institutional_mapping_v5 as v5
