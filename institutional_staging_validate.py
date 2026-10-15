@@ -98,11 +98,13 @@ def validate(*, source_db: str | None = None) -> dict[str, Any]:
 
         eligible_mappings = _scalar(
             con,
-            f"""SELECT count(*) FROM {event_markets} em
-                JOIN {ticks} t ON t.venue=em.venue AND t.market_id=em.market_id
-                WHERE t.venue IN ('kalshi','polymarket')
-                GROUP BY ALL""".replace("SELECT count(*)", "SELECT count(*) FROM (SELECT DISTINCT em.venue, em.market_id, em.canonical_event_id")
-                + ") q",
+            f"""SELECT count(*) FROM (
+                  SELECT DISTINCT em.venue, em.market_id, em.canonical_event_id
+                  FROM {event_markets} em
+                  JOIN {ticks} t
+                    ON t.venue=em.venue AND t.market_id=em.market_id
+                  WHERE t.venue IN ('kalshi','polymarket')
+                ) q""",
         )
         migrated_mappings = _scalar(
             con,
