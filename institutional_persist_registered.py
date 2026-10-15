@@ -8,7 +8,7 @@ This is the v4 persistence body without a second Arrow registration/materializat
 from __future__ import annotations
 
 
-def persist_registered_batch(con, *, method_version: str) -> dict:
+def persist_registered_batch(con, *, method_version: str, collect_seen_ids: bool = True) -> dict:
     con.execute("SET TimeZone='UTC'")
 
     con.execute("""
@@ -154,7 +154,9 @@ def persist_registered_batch(con, *, method_version: str) -> dict:
 
     changed = int(con.execute("SELECT count(*) FROM _contract_changes").fetchone()[0])
     semantic_changed = int(con.execute("SELECT count(*) FROM _semantic_changes").fetchone()[0])
-    seen_ids = {r[0] for r in con.execute("SELECT source_contract_id FROM _batch_contracts").fetchall()}
+    seen_ids = None
+    if collect_seen_ids:
+        seen_ids = {r[0] for r in con.execute("SELECT source_contract_id FROM _batch_contracts").fetchall()}
     return {
         "contract_versions_created": changed,
         "semantic_versions_created": semantic_changed,
