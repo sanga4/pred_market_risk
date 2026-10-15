@@ -56,7 +56,7 @@ def _sync_rule(
             INSERT INTO er_quality_issues(
               quality_issue_id,object_type,object_id,rule_code,severity,status,details,detected_at,
               resolved_at,resolution_notes)
-            SELECT quality_issue_id,?,?,?,?,'open',details,now(),NULL,NULL FROM {temp}
+            SELECT quality_issue_id,?,object_id,?,?,'open',details,now(),NULL,NULL FROM {temp}
             ON CONFLICT(quality_issue_id) DO UPDATE SET
               severity=excluded.severity,status='open',details=excluded.details,detected_at=now(),
               resolved_at=NULL,resolution_notes=NULL
