@@ -3,6 +3,10 @@ from __future__ import annotations
 import institutional_ingest_v12 as v12
 
 
+def test_v12_installs_thread_local_http_client():
+    assert v12.base.get_json is v12.thread_safe_get_json
+
+
 def test_prime_source_is_bounded_and_preserves_remainder(monkeypatch):
     class Adapter:
         def iter_snapshots(self):
