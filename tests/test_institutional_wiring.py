@@ -31,12 +31,12 @@ def test_runtime_collectors_use_promoted_incremental_pipeline():
         assert "from institutional_archive_v2 import archive_pending" in body
         assert "from institutional_ingest_v8 import run_once" in body
         assert "from institutional_mapping_v6 import run_mapping_pass" in body
-        assert "from institutional_mapping_drift import persist_mapping_drift" in body
+        assert "from institutional_mapping_drift_v2 import persist_mapping_drift" in body
         assert "from institutional_lifecycle import sync_event_lifecycle" in body
         assert "from institutional_ontology_v2 import run_ontology_pass" in body
         assert "from institutional_graph_v3 import run_graph_pass" in body
         assert "from institutional_reference_versions_v2 import sync_reference_versions" in body
-        assert "from institutional_qa_v3 import run_qa" in body
+        assert "from institutional_qa_v4 import run_qa" in body
         assert "from institutional_run_recovery import recover_abandoned_runs" in body
         assert "RAW_ARCHIVE_MAX_ROWS" in body
         assert "RAW_ARCHIVE_BATCH_SIZE" in body
