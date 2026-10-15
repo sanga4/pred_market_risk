@@ -12,7 +12,7 @@ import os
 import time
 
 from institutional_graph_v3 import run_graph_pass
-from institutional_lifecycle import sync_event_lifecycle
+from institutional_lifecycle_v2 import sync_event_lifecycle
 from institutional_mapping_drift_v2 import persist_mapping_drift
 from institutional_mapping_v8 import run_mapping_pass
 from institutional_migrations_v2 import ensure_schema
