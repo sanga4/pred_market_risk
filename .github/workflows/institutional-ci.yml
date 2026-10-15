@@ -27,7 +27,7 @@ jobs:
             institutional_http.py \
             institutional_ingest.py institutional_ingest_v2.py institutional_ingest_v3.py institutional_ingest_v4.py institutional_ingest_v5.py institutional_ingest_v6.py institutional_ingest_v7.py institutional_ingest_v8.py institutional_ingest_v9.py institutional_ingest_v10.py institutional_ingest_v11.py institutional_persist_registered.py institutional_presence_v2.py institutional_presence_v3.py institutional_universe_adapters.py \
             institutional_archive.py institutional_archive_v2.py \
-            institutional_mapping.py institutional_mapping_v2.py institutional_mapping_v3.py institutional_mapping_v4.py institutional_mapping_v5.py institutional_mapping_v6.py institutional_mapping_v7.py institutional_mapping_v8.py institutional_mapping_identity_v1.py institutional_mapping_drift.py institutional_mapping_drift_v2.py \
+            institutional_mapping.py institutional_mapping_v2.py institutional_mapping_v3.py institutional_mapping_v4.py institutional_mapping_v5.py institutional_mapping_v6.py institutional_mapping_v7.py institutional_mapping_v8.py institutional_mapping_advisory_v1.py institutional_mapping_identity_v1.py institutional_mapping_drift.py institutional_mapping_drift_v2.py \
             institutional_ontology.py institutional_ontology_v2.py institutional_lifecycle.py institutional_lifecycle_v2.py \
             institutional_graph.py institutional_graph_v2.py institutional_graph_v3.py \
             institutional_reference_versions.py institutional_reference_versions_v2.py \
@@ -38,7 +38,7 @@ jobs:
             institutional_stream.py institutional_exports.py institutional_exports_v2.py institutional_exports_v3.py \
             institutional_run_recovery.py institutional_runtime_lease.py \
             institutional_service.py institutional_public_service.py institutional_worker.py institutional_worker_v3.py institutional_worker_v4.py institutional_worker_v5.py \
-            institutional_enrichment_worker.py institutional_enrichment_worker_v2.py institutional_enrichment_worker_v3.py institutional_enrichment_worker_v4.py institutional_enrichment_worker_v5.py \
+            institutional_enrichment_worker.py institutional_enrichment_worker_v2.py institutional_enrichment_worker_v3.py institutional_enrichment_worker_v4.py institutional_enrichment_worker_v5.py institutional_enrichment_worker_v6.py \
             institutional_backfill.py institutional_migrations.py institutional_migrations_v2.py migrate_institutional.py eventrisk_sdk.py
       - name: Run institutional tests
         run: python -m pytest -q tests
