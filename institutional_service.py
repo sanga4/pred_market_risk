@@ -29,7 +29,7 @@ from institutional_mapping_identity_v1 import run_identity_pass
 from institutional_migrations_v2 import ensure_schema
 from institutional_ops_api import router as ops_router
 from institutional_readiness_api import router as readiness_router
-from institutional_readiness_v4 import evaluate_identity_readiness, evaluate_observed_readiness
+from institutional_readiness_v5 import evaluate_identity_readiness, evaluate_observed_readiness
 from institutional_run_recovery import recover_abandoned_runs
 from institutional_stream import router as stream_router
 
