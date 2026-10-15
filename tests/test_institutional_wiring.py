@@ -11,57 +11,79 @@ def test_all_runtime_migration_paths_use_shared_ledger():
     base_runner = text("institutional_migrations.py")
     extension_runner = text("institutional_migrations_v2.py")
     assert '"institutional_schema_025.sql"' in base_runner
-    for migration in range(26, 35):
+    for migration in range(26, 36):
         assert f'"institutional_schema_{migration:03d}.sql"' in extension_runner
     assert "er_schema_migrations" in base_runner
     assert "er_schema_migrations" in extension_runner
     assert "ensure_base_schema" in extension_runner
 
-    for name in ["institutional_service.py", "institutional_worker.py", "migrate_institutional.py"]:
+    for name in [
+        "institutional_service.py", "institutional_worker.py",
+        "institutional_enrichment_worker.py", "migrate_institutional.py",
+    ]:
         body = text(name)
         assert "from institutional_migrations_v2 import ensure_schema" in body, (
             f"{name} must use the shared restart-safe migration ledger extension"
         )
 
 
-def test_runtime_collectors_use_promoted_incremental_pipeline():
+def test_hot_runtime_uses_promoted_v10_identity_pipeline_only():
     for name in ["institutional_service.py", "institutional_worker.py"]:
         body = text(name)
         assert "from institutional_archive_v2 import archive_pending" in body
-        assert "from institutional_ingest_v8 import run_once" in body
-        assert "from institutional_mapping_drift_v2 import persist_mapping_drift" in body
-        assert "from institutional_lifecycle import sync_event_lifecycle" in body
-        assert "from institutional_ontology_v2 import run_ontology_pass" in body
-        assert "from institutional_graph_v3 import run_graph_pass" in body
-        assert "from institutional_reference_versions_v2 import sync_reference_versions" in body
-        assert "from institutional_qa_v4 import run_qa" in body
+        assert "from institutional_ingest_v10 import run_once" in body
+        assert "from institutional_mapping_identity_v1 import run_identity_pass" in body
+        assert "evaluate_observed_readiness" in body
+        assert "evaluate_identity_readiness" in body
         assert "from institutional_run_recovery import recover_abandoned_runs" in body
         assert "RAW_ARCHIVE_MAX_ROWS" in body
         assert "RAW_ARCHIVE_BATCH_SIZE" in body
         assert '"timing_seconds"' in body
+        for forbidden in [
+            "institutional_mapping_v8", "institutional_mapping_v7", "institutional_mapping_v6",
+            "institutional_ontology_v2", "institutional_graph_v3",
+            "institutional_mapping_drift_v2", "institutional_reference_versions_v2",
+            "institutional_qa_v4", "sync_event_lifecycle",
+        ]:
+            assert forbidden not in body
 
-    worker = text("institutional_worker.py")
-    service = text("institutional_service.py")
-    assert "from institutional_mapping_v7 import run_mapping_pass" in worker
-    assert "from institutional_mapping_v6 import run_mapping_pass" in service
+
+def test_enrichment_runtime_owns_advisory_normalization_and_full_qa():
+    body = text("institutional_enrichment_worker.py")
+    for required in [
+        "from institutional_mapping_v8 import run_mapping_pass",
+        "from institutional_lifecycle import sync_event_lifecycle",
+        "from institutional_ontology_v2 import run_ontology_pass",
+        "from institutional_graph_v3 import run_graph_pass",
+        "from institutional_reference_versions_v2 import sync_reference_versions",
+        "from institutional_mapping_drift_v2 import persist_mapping_drift",
+        "from institutional_qa_v4 import run_qa",
+        "evaluate_enrichment_readiness",
+        "enrichment_path_v1_async",
+    ]:
+        assert required in body
+    assert "institutional_ingest_v10" not in body
+    assert "institutional_mapping_identity_v1" not in body
 
 
-def test_mapping_v7_is_registered_and_staged_worker_only_for_acceptance():
+def test_mapping_v7_remains_historical_and_not_promoted():
     body = text("institutional_mapping_v7.py")
     schema29 = text("institutional_schema_029.sql")
     assert "mapping_rules_v7_python_overlap" in body
     assert "mapping_rules_v7_python_overlap" in schema29
     assert "python_meaningful_tokens_v1" in body
-    assert "from institutional_mapping_v7 import run_mapping_pass" in text("institutional_worker.py")
-    assert "from institutional_mapping_v6 import run_mapping_pass" in text("institutional_service.py")
+    assert "from institutional_mapping_v7 import run_mapping_pass" not in text("institutional_worker.py")
+    assert "from institutional_mapping_v7 import run_mapping_pass" not in text("institutional_service.py")
+    assert "from institutional_mapping_v7 import run_mapping_pass" not in text("institutional_enrichment_worker.py")
 
 
-def test_mapping_v8_is_registered_but_not_promoted_before_acceptance():
+def test_mapping_v8_is_promoted_only_to_advisory_enrichment():
     body = text("institutional_mapping_v8.py")
     schema30 = text("institutional_schema_030.sql")
     assert "mapping_rules_v8_changed_token_frequency" in body
     assert "mapping_rules_v8_changed_token_frequency" in schema30
     assert "frequency_scope" in body and "changed_tokens_only" in body
+    assert "from institutional_mapping_v8 import run_mapping_pass" in text("institutional_enrichment_worker.py")
     assert "from institutional_mapping_v8 import run_mapping_pass" not in text("institutional_worker.py")
     assert "from institutional_mapping_v8 import run_mapping_pass" not in text("institutional_service.py")
 
@@ -75,7 +97,7 @@ def test_v8_runtime_uses_direct_temp_persistence_and_set_based_presence():
     assert "BEGIN TRANSACTION" in body and "ROLLBACK" in body
 
 
-def test_ingest_v9_is_registered_but_not_promoted_before_acceptance():
+def test_ingest_v9_remains_historical_after_v10_promotion():
     body = text("institutional_ingest_v9.py")
     presence = text("institutional_presence_v3.py")
     schema31 = text("institutional_schema_031.sql")
@@ -90,7 +112,7 @@ def test_ingest_v9_is_registered_but_not_promoted_before_acceptance():
     assert "from institutional_ingest_v9 import run_once" not in text("institutional_service.py")
 
 
-def test_identity_mapping_lane_is_registered_and_separate_from_fuzzy_runtime():
+def test_identity_mapping_lane_is_promoted_to_hot_runtime_and_excludes_fuzzy():
     body = text("institutional_mapping_identity_v1.py")
     schema32 = text("institutional_schema_032.sql")
     for value in ["identity_mapping_v1_strict_exact", "er_mapping_identity_state", "er_mapping_identity_work_queue"]:
@@ -98,11 +120,12 @@ def test_identity_mapping_lane_is_registered_and_separate_from_fuzzy_runtime():
     assert "fuzzy_review_candidates_excluded" in body
     assert "normalized_title=l.normalized_title" in body
     assert "normalized_rules=l.normalized_rules" in body
-    assert "from institutional_mapping_identity_v1" not in text("institutional_worker.py")
-    assert "from institutional_mapping_identity_v1" not in text("institutional_service.py")
+    assert "from institutional_mapping_identity_v1 import run_identity_pass" in text("institutional_worker.py")
+    assert "from institutional_mapping_identity_v1 import run_identity_pass" in text("institutional_service.py")
+    assert "institutional_mapping_identity_v1" not in text("institutional_enrichment_worker.py")
 
 
-def test_ingest_v10_current_state_pointers_are_staged_only():
+def test_ingest_v10_current_state_pointers_are_promoted_to_hot_runtime():
     body = text("institutional_ingest_v10.py")
     schema33 = text("institutional_schema_033.sql")
     for value in ["er_raw_current_snapshots", "er_market_current_state", "change_data_capture_v10_stateful"]:
@@ -111,8 +134,9 @@ def test_ingest_v10_current_state_pointers_are_staged_only():
     assert "LEFT JOIN er_market_current_state" in body
     assert "er_latest_market_observations" not in body
     assert "collect_seen_ids=False" in body
-    assert "from institutional_ingest_v10 import run_once" not in text("institutional_worker.py")
-    assert "from institutional_ingest_v10 import run_once" not in text("institutional_service.py")
+    assert "from institutional_ingest_v10 import run_once" in text("institutional_worker.py")
+    assert "from institutional_ingest_v10 import run_once" in text("institutional_service.py")
+    assert "institutional_ingest_v10" not in text("institutional_enrichment_worker.py")
 
 
 def test_layered_readiness_is_registered_and_api_exposes_each_lane():
@@ -126,6 +150,12 @@ def test_layered_readiness_is_registered_and_api_exposes_each_lane():
     assert "evaluate_enrichment_readiness" in api
     for path in ["/v1/readiness/observed", "/v1/readiness/identity", "/v1/readiness/enrichment"]:
         assert path in api
+
+
+def test_layered_runtime_topology_is_registered():
+    schema35 = text("institutional_schema_035.sql")
+    for value in ["hot_path_v1_v10_identity", "enrichment_path_v1_async", "institutional_enrichment_worker.py"]:
+        assert value in schema35
 
 
 def test_ops_review_uses_current_serving_mapping_semantics():
@@ -248,6 +278,10 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
 
     schema34 = text("institutional_schema_034.sql")
     assert "institutional_readiness_v4_layered" in schema34
+
+    schema35 = text("institutional_schema_035.sql")
+    for value in ["hot_path_v1_v10_identity", "enrichment_path_v1_async"]:
+        assert value in schema35
 
 
 def test_raw_bundle_schema_exists():
