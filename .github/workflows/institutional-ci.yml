@@ -38,7 +38,7 @@ jobs:
             institutional_stream.py institutional_exports.py institutional_exports_v2.py institutional_exports_v3.py \
             institutional_run_recovery.py institutional_runtime_lease.py \
             institutional_service.py institutional_public_service.py institutional_worker.py institutional_worker_v3.py institutional_worker_v4.py institutional_worker_v5.py \
-            institutional_enrichment_worker.py institutional_enrichment_worker_v2.py institutional_enrichment_worker_v3.py institutional_enrichment_worker_v4.py institutional_enrichment_worker_v5.py institutional_enrichment_worker_v6.py institutional_enrichment_worker_v7.py institutional_enrichment_worker_v8.py institutional_enrichment_worker_v9.py \
+            institutional_enrichment_worker.py institutional_enrichment_worker_v2.py institutional_enrichment_worker_v3.py institutional_enrichment_worker_v4.py institutional_enrichment_worker_v5.py institutional_enrichment_worker_v6.py institutional_enrichment_worker_v7.py institutional_enrichment_worker_v8.py institutional_enrichment_worker_v9.py institutional_enrichment_worker_v10.py \
             institutional_backfill.py institutional_migrations.py institutional_migrations_v2.py migrate_institutional.py eventrisk_sdk.py
       - name: Run institutional tests
         run: python -m pytest -q tests
