@@ -114,6 +114,7 @@ async def public_boundary_and_auth(request: Request, call_next):
 
 @app.get("/health")
 def health():
+    """Cheap operational health check; never materialize analytical history views here."""
     try:
         con = connect(read_only=True)
         try:
@@ -121,7 +122,20 @@ def health():
             active_contracts = int(
                 con.execute("SELECT count(*) FROM er_source_contracts WHERE active=TRUE").fetchone()[0]
             )
-            served_events = int(con.execute("SELECT count(*) FROM er_served_canonical_events").fetchone()[0])
+            # `er_served_canonical_events` intentionally includes latest-observation taxonomy and
+            # therefore window-scans observation history. Counting it made /health scale with the
+            # entire time series. Count the current serving identity directly instead: active
+            # contracts + live mappings + non-retired canonical events. This remains semantically
+            # appropriate for an operational cardinality metric and is bounded by current state.
+            served_events = int(con.execute("""
+                SELECT count(DISTINCT m.canonical_event_id)
+                FROM er_event_mappings m
+                JOIN er_source_contracts c USING(source_contract_id)
+                JOIN er_canonical_events e USING(canonical_event_id)
+                WHERE m.valid_to IS NULL
+                  AND c.active=TRUE
+                  AND e.status NOT IN ('superseded','inactive')
+            """).fetchone()[0])
             critical_qa = int(
                 con.execute(
                     "SELECT count(*) FROM er_quality_issues WHERE status='open' AND severity='critical'"
