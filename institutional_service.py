@@ -1,7 +1,8 @@
 """Standalone EventRisk institutional data service.
 
-The API is isolated from the retail app. Staging may run collection in-process; production
-can move the same cycle to a dedicated worker without changing data semantics.
+The API is isolated from the retail app. If the optional in-process collector is enabled it uses
+the same promoted observed-data + deterministic-identity hot path as the dedicated worker.
+Advisory enrichment runs separately in `institutional_enrichment_worker`.
 """
 
 from __future__ import annotations
@@ -22,18 +23,13 @@ from institutional_archive_v2 import archive_pending
 from institutional_auth import authenticate_key, extract_bearer
 from institutional_changefeed_api import router as changefeed_router
 from institutional_curve_api import router as curve_router
-from institutional_graph_v3 import run_graph_pass
 from institutional_history_api import router as history_router
-from institutional_ingest_v8 import run_once
-from institutional_lifecycle import sync_event_lifecycle
-from institutional_mapping_drift_v2 import persist_mapping_drift
-from institutional_mapping_v6 import run_mapping_pass
+from institutional_ingest_v10 import run_once
+from institutional_mapping_identity_v1 import run_identity_pass
 from institutional_migrations_v2 import ensure_schema
-from institutional_ontology_v2 import run_ontology_pass
 from institutional_ops_api import router as ops_router
-from institutional_qa_v4 import run_qa
 from institutional_readiness_api import router as readiness_router
-from institutional_reference_versions_v2 import sync_reference_versions
+from institutional_readiness_v4 import evaluate_identity_readiness, evaluate_observed_readiness
 from institutional_run_recovery import recover_abandoned_runs
 from institutional_stream import router as stream_router
 
@@ -58,6 +54,10 @@ def pipeline_cycle():
     timings: dict[str, float] = {}
 
     ingest = _run_stage(timings, "ingest", run_once)
+    failed_sources = [r for r in ingest if r.get("status") != "success"]
+    if failed_sources:
+        raise RuntimeError(f"One or more source ingestions failed: {failed_sources}")
+
     archive = _run_stage(
         timings,
         "archive",
@@ -65,30 +65,32 @@ def pipeline_cycle():
         max_rows=int(os.getenv("RAW_ARCHIVE_MAX_ROWS", "20000")),
         bundle_rows=int(os.getenv("RAW_ARCHIVE_BATCH_SIZE", "5000")),
     )
-    mapping = _run_stage(timings, "mapping", run_mapping_pass)
-    lifecycle = _run_stage(timings, "lifecycle", sync_event_lifecycle)
-    ontology = _run_stage(timings, "ontology", run_ontology_pass)
-    graph = _run_stage(timings, "graph", run_graph_pass)
-    reference_versions = _run_stage(timings, "reference_versions", sync_reference_versions)
-    mapping_drift = _run_stage(timings, "mapping_drift", persist_mapping_drift)
-    qa = _run_stage(
+    if archive.get("configured") and archive.get("failed", 0):
+        raise RuntimeError(f"Raw archive failed for {archive['failed']} snapshot(s): {archive}")
+
+    identity = _run_stage(timings, "identity", run_identity_pass)
+    observed_readiness = _run_stage(
         timings,
-        "qa",
-        run_qa,
+        "observed_readiness",
+        evaluate_observed_readiness,
         stale_minutes=max(20, int(os.getenv("COLLECT_INTERVAL_SECONDS", "300")) // 60 * 4),
+        require_archive=None,
     )
+    identity_readiness = _run_stage(timings, "identity_readiness", evaluate_identity_readiness)
+    if not observed_readiness.get("ready"):
+        raise RuntimeError(f"Observed-data readiness failed: {observed_readiness.get('failed_controls')}")
+    if not identity_readiness.get("ready"):
+        raise RuntimeError(f"Deterministic identity readiness failed: {identity_readiness.get('failed_controls')}")
+
     timings["cycle_total"] = round(time.monotonic() - cycle_started, 6)
     return {
         "ingest": ingest,
         "archive": archive,
-        "mapping": mapping,
-        "lifecycle": lifecycle,
-        "ontology": ontology,
-        "graph": graph,
-        "reference_versions": reference_versions,
-        "mapping_drift": mapping_drift,
-        "qa": qa,
+        "identity": identity,
+        "observed_readiness": observed_readiness,
+        "identity_readiness": identity_readiness,
         "timing_seconds": timings,
+        "runtime_topology": "hot_path_v1_v10_identity",
     }
 
 
@@ -98,13 +100,15 @@ async def collector_loop(stop: asyncio.Event):
     log.info("institutional collector enabled interval_seconds=%s initial_delay_seconds=%s", interval, initial_delay)
     await asyncio.sleep(initial_delay)
     while not stop.is_set():
+        started = time.monotonic()
         try:
             result = await asyncio.to_thread(pipeline_cycle)
             log.info("institutional collection cycle completed: %s", result)
         except Exception:
             log.exception("institutional collection cycle failed")
+        elapsed = time.monotonic() - started
         try:
-            await asyncio.wait_for(stop.wait(), timeout=interval)
+            await asyncio.wait_for(stop.wait(), timeout=max(1.0, interval - elapsed))
         except asyncio.TimeoutError:
             pass
 
