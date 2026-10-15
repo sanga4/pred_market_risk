@@ -37,6 +37,41 @@ def test_v13_runs_sources_concurrently_and_preserves_result_order(monkeypatch):
     assert all(row["orchestration"]["method_version"] == v13.ORCHESTRATION_VERSION for row in results)
 
 
+def test_v13_serializes_only_shared_prepare_and_restores_prepare_function(monkeypatch):
+    post_prepare_barrier = threading.Barrier(2)
+    state_lock = threading.Lock()
+    active_prepare = 0
+    max_active_prepare = 0
+
+    monkeypatch.setattr(v13.v11, "ADAPTERS", {"kalshi": object, "polymarket": object})
+
+    def fake_prepare(source_id):
+        nonlocal active_prepare, max_active_prepare
+        with state_lock:
+            active_prepare += 1
+            max_active_prepare = max(max_active_prepare, active_prepare)
+        time.sleep(0.03)
+        with state_lock:
+            active_prepare -= 1
+        return f"run-{source_id}", {"scope": "full"}
+
+    monkeypatch.setattr(v13.v11.v10, "_prepare_run", fake_prepare)
+
+    def fake_ingest(source_id):
+        # run_once temporarily replaces this call with its serialized wrapper.
+        v13.v11.v10._prepare_run(source_id)
+        # Both threads must still be able to overlap immediately after the serialized preflight.
+        post_prepare_barrier.wait(timeout=2.0)
+        return {"source_id": source_id, "status": "success", "records_written": 1}
+
+    monkeypatch.setattr(v13.v11, "ingest_source", fake_ingest)
+    results = v13.run_once(["kalshi", "polymarket"])
+
+    assert all(row["status"] == "success" for row in results)
+    assert max_active_prepare == 1
+    assert v13.v11.v10._prepare_run is fake_prepare
+
+
 def test_v13_one_source_failure_is_explicit_and_does_not_hide_other_success(monkeypatch):
     barrier = threading.Barrier(2)
     monkeypatch.setattr(v13.v11, "ADAPTERS", {"kalshi": object, "polymarket": object})
