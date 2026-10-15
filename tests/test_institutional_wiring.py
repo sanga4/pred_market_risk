@@ -11,11 +11,8 @@ def test_all_runtime_migration_paths_use_shared_ledger():
     base_runner = text("institutional_migrations.py")
     extension_runner = text("institutional_migrations_v2.py")
     assert '"institutional_schema_025.sql"' in base_runner
-    assert '"institutional_schema_026.sql"' in extension_runner
-    assert '"institutional_schema_027.sql"' in extension_runner
-    assert '"institutional_schema_028.sql"' in extension_runner
-    assert '"institutional_schema_029.sql"' in extension_runner
-    assert '"institutional_schema_030.sql"' in extension_runner
+    for migration in range(26, 32):
+        assert f'"institutional_schema_{migration:03d}.sql"' in extension_runner
     assert "er_schema_migrations" in base_runner
     assert "er_schema_migrations" in extension_runner
     assert "ensure_base_schema" in extension_runner
@@ -76,6 +73,21 @@ def test_v8_runtime_uses_direct_temp_persistence_and_set_based_presence():
     assert "pa.default_memory_pool().release_unused()" in body
     assert "rss_max_mb" in body
     assert "BEGIN TRANSACTION" in body and "ROLLBACK" in body
+
+
+def test_ingest_v9_is_registered_but_not_promoted_before_acceptance():
+    body = text("institutional_ingest_v9.py")
+    presence = text("institutional_presence_v3.py")
+    schema31 = text("institutional_schema_031.sql")
+    assert "change_data_capture_v9_streamed" in body
+    assert "presence_reconciliation_v3_staged_seen" in presence
+    assert "change_data_capture_v9_streamed" in schema31
+    assert "presence_reconciliation_v3_staged_seen" in schema31
+    assert "itertools.islice" in body
+    assert "stage_seen_from_registered_batch" in body
+    assert "collect_seen_ids=False" in body
+    assert "from institutional_ingest_v9 import run_once" not in text("institutional_worker.py")
+    assert "from institutional_ingest_v9 import run_once" not in text("institutional_service.py")
 
 
 def test_ops_review_uses_current_serving_mapping_semantics():
@@ -183,6 +195,10 @@ def test_latest_schema_contains_point_in_time_semantic_presence_mapping_and_ops_
 
     schema30 = text("institutional_schema_030.sql")
     assert "mapping_rules_v8_changed_token_frequency" in schema30
+
+    schema31 = text("institutional_schema_031.sql")
+    for value in ["change_data_capture_v9_streamed", "presence_reconciliation_v3_staged_seen"]:
+        assert value in schema31
 
 
 def test_raw_bundle_schema_exists():
