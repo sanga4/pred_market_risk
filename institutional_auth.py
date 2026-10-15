@@ -1,7 +1,10 @@
 """Institutional API key authentication.
 
-Customer secrets are never stored in plaintext.  The admin creation flow returns a new
+Customer secrets are never stored in plaintext. The admin creation flow returns a new
 key once and stores only its SHA-256 digest in er_api_clients.
+
+The public API can authenticate in a strictly read-only mode. Usage timestamps are optional
+telemetry and must never turn the public query plane into a write dependency.
 """
 
 from __future__ import annotations
@@ -30,11 +33,21 @@ def extract_bearer(authorization: Optional[str], x_api_key: Optional[str]) -> Op
     return None
 
 
-def authenticate_key(secret: Optional[str], required_scope: str = "read") -> Optional[dict]:
+def authenticate_key(
+    secret: Optional[str],
+    required_scope: str = "read",
+    *,
+    record_usage: bool = True,
+) -> Optional[dict]:
     """Return authenticated client metadata, or None.
 
-    EVENTRISK_API_KEY remains a bootstrap/staging master key.  Production customer keys are
+    EVENTRISK_API_KEY remains a bootstrap/staging master key. Production customer keys are
     hashed records in er_api_clients and can be disabled independently.
+
+    ``record_usage=False`` is the public/read-plane mode: authentication performs no database
+    mutation. This lets the public service use a read-only MotherDuck credential and keeps request
+    authorization independent from write availability. A separate audit/metrics path can record
+    usage without weakening that boundary.
     """
     if not secret:
         return None
@@ -43,7 +56,7 @@ def authenticate_key(secret: Optional[str], required_scope: str = "read") -> Opt
         return {"client_id": "bootstrap", "client_name": "bootstrap", "scopes": "read,stream"}
 
     digest = hash_key(secret)
-    con = connect()
+    con = connect(read_only=not record_usage)
     try:
         row = con.execute(
             "SELECT client_id,client_name,scopes,active FROM er_api_clients WHERE key_hash=?",
@@ -54,7 +67,8 @@ def authenticate_key(secret: Optional[str], required_scope: str = "read") -> Opt
         scopes = {x.strip() for x in (row[2] or "read").split(",") if x.strip()}
         if required_scope not in scopes and "admin" not in scopes:
             return None
-        con.execute("UPDATE er_api_clients SET last_used_at=now() WHERE client_id=?", [row[0]])
+        if record_usage:
+            con.execute("UPDATE er_api_clients SET last_used_at=now() WHERE client_id=?", [row[0]])
         return {"client_id": row[0], "client_name": row[1], "scopes": ",".join(sorted(scopes))}
     finally:
         con.close()
