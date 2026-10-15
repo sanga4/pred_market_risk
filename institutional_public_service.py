@@ -100,7 +100,7 @@ async def public_boundary_and_auth(request: Request, call_next):
         supplied = extract_bearer(
             request.headers.get("authorization"), request.headers.get("x-api-key")
         )
-        client = authenticate_key(supplied, "read")
+        client = authenticate_key(supplied, "read", record_usage=False)
         if client is None:
             return JSONResponse({"detail": "Valid EventRisk API key required"}, status_code=401)
         request.state.eventrisk_client = client
