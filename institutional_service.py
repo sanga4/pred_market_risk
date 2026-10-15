@@ -24,7 +24,7 @@ from institutional_auth import authenticate_key, extract_bearer
 from institutional_changefeed_api import router as changefeed_router
 from institutional_curve_api import router as curve_router
 from institutional_history_api import router as history_router
-from institutional_ingest_v10 import run_once
+from institutional_ingest_v11 import run_once
 from institutional_mapping_identity_v1 import run_identity_pass
 from institutional_migrations_v2 import ensure_schema
 from institutional_ops_api import router as ops_router
@@ -90,7 +90,7 @@ def pipeline_cycle():
         "observed_readiness": observed_readiness,
         "identity_readiness": identity_readiness,
         "timing_seconds": timings,
-        "runtime_topology": "hot_path_v1_v10_identity",
+        "runtime_topology": "hot_path_v2_v11_identity",
     }
 
 
