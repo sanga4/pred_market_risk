@@ -31,7 +31,6 @@ def test_runtime_collectors_use_promoted_incremental_pipeline():
         body = text(name)
         assert "from institutional_archive_v2 import archive_pending" in body
         assert "from institutional_ingest_v8 import run_once" in body
-        assert "from institutional_mapping_v6 import run_mapping_pass" in body
         assert "from institutional_mapping_drift_v2 import persist_mapping_drift" in body
         assert "from institutional_lifecycle import sync_event_lifecycle" in body
         assert "from institutional_ontology_v2 import run_ontology_pass" in body
@@ -43,13 +42,20 @@ def test_runtime_collectors_use_promoted_incremental_pipeline():
         assert "RAW_ARCHIVE_BATCH_SIZE" in body
         assert '"timing_seconds"' in body
 
+    worker = text("institutional_worker.py")
+    service = text("institutional_service.py")
+    assert "from institutional_mapping_v7 import run_mapping_pass" in worker
+    assert "from institutional_mapping_v6 import run_mapping_pass" in service
 
-def test_mapping_v7_is_registered_but_not_promoted_without_acceptance():
+
+def test_mapping_v7_is_registered_and_staged_worker_only_for_acceptance():
     body = text("institutional_mapping_v7.py")
     schema29 = text("institutional_schema_029.sql")
     assert "mapping_rules_v7_python_overlap" in body
     assert "mapping_rules_v7_python_overlap" in schema29
     assert "python_meaningful_tokens_v1" in body
+    assert "from institutional_mapping_v7 import run_mapping_pass" in text("institutional_worker.py")
+    assert "from institutional_mapping_v6 import run_mapping_pass" in text("institutional_service.py")
 
 
 def test_v8_runtime_uses_direct_temp_persistence_and_set_based_presence():
@@ -61,7 +67,7 @@ def test_v8_runtime_uses_direct_temp_persistence_and_set_based_presence():
     assert "BEGIN TRANSACTION" in body and "ROLLBACK" in body
 
 
-def test_ops_review_uses_current_mapping_semantics():
+def test_ops_review_uses_current_serving_mapping_semantics():
     body = text("institutional_ops_api.py")
     assert "from institutional_mapping_v6 import DIRECTIONS, RELATIONSHIP_TYPES, review_candidate" in body
 
