@@ -1,0 +1,44 @@
+name: institutional-ci
+
+on:
+  push:
+    branches: [institutional-data-v1]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+      - name: Compile institutional modules
+        run: |
+          python -m py_compile \
+            institutional_http.py \
+            institutional_ingest.py institutional_ingest_v2.py institutional_ingest_v3.py institutional_ingest_v4.py institutional_ingest_v5.py institutional_ingest_v6.py institutional_ingest_v7.py institutional_ingest_v8.py institutional_ingest_v9.py institutional_ingest_v10.py institutional_ingest_v11.py institutional_ingest_v12.py institutional_ingest_v13.py institutional_persist_registered.py institutional_presence_v2.py institutional_presence_v3.py institutional_universe_adapters.py \
+            institutional_archive.py institutional_archive_v2.py \
+            institutional_mapping.py institutional_mapping_v2.py institutional_mapping_v3.py institutional_mapping_v4.py institutional_mapping_v5.py institutional_mapping_v6.py institutional_mapping_v7.py institutional_mapping_v8.py institutional_mapping_advisory_v1.py institutional_mapping_advisory_v2.py institutional_mapping_identity_v1.py institutional_mapping_drift.py institutional_mapping_drift_v2.py \
+            institutional_ontology.py institutional_ontology_v2.py institutional_lifecycle.py institutional_lifecycle_v2.py \
+            institutional_graph.py institutional_graph_v2.py institutional_graph_v3.py institutional_graph_v4.py \
+            institutional_reference_versions.py institutional_reference_versions_v2.py institutional_security_master_sync.py \
+            institutional_qa.py institutional_qa_v2.py institutional_qa_v3.py institutional_qa_v4.py institutional_qa_v5.py institutional_qa_v6.py institutional_qa_v7.py institutional_qa_v8.py institutional_qa_v9.py institutional_qa_v10.py \
+            institutional_readiness.py institutional_readiness_v2.py institutional_readiness_v3.py institutional_readiness_v4.py institutional_readiness_v5.py institutional_readiness_v6.py institutional_readiness_api.py \
+            institutional_api.py institutional_curve_api.py institutional_changefeed_api.py institutional_ops_api.py institutional_public_queries_api.py \
+            institutional_history_api.py institutional_admin_api.py institutional_auth.py \
+            institutional_stream.py institutional_exports.py institutional_exports_v2.py institutional_exports_v3.py institutional_exports_v4.py \
+            institutional_run_recovery.py institutional_runtime_lease.py \
+            institutional_service.py institutional_public_service.py institutional_worker.py institutional_worker_v3.py institutional_worker_v4.py institutional_worker_v5.py institutional_worker_v6.py institutional_worker_v7.py \
+            institutional_enrichment_worker.py institutional_enrichment_worker_v2.py institutional_enrichment_worker_v3.py institutional_enrichment_worker_v4.py institutional_enrichment_worker_v5.py institutional_enrichment_worker_v6.py institutional_enrichment_worker_v7.py institutional_enrichment_worker_v8.py institutional_enrichment_worker_v9.py institutional_enrichment_worker_v10.py institutional_enrichment_worker_v11.py \
+            institutional_backfill.py institutional_migrations.py institutional_migrations_v2.py migrate_institutional.py eventrisk_sdk.py
+      - name: Run institutional tests
+        run: python -m pytest -q tests
