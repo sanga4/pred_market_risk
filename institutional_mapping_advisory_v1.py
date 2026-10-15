@@ -23,6 +23,38 @@ from __future__ import annotations
 ADVISORY_EXECUTION_VERSION = "mapping_advisory_v1_candidate_only"
 
 
+def _stamp_execution_provenance(pass_id: str) -> None:
+    """Persist the wrapper/mutation boundary on the durable mapping-pass audit record."""
+    import json
+    from db import connect
+
+    con = connect()
+    try:
+        row = con.execute(
+            "SELECT details FROM er_mapping_passes WHERE pass_id=?", [pass_id]
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(f"mapping pass {pass_id} missing while stamping advisory provenance")
+        try:
+            details = json.loads(row[0]) if row[0] else {}
+        except Exception:
+            details = {"prior_details_unparsed": str(row[0])[:4000]}
+        details.update({
+            "execution_version": ADVISORY_EXECUTION_VERSION,
+            "identity_owner": "institutional_mapping_identity_v1",
+            "identity_mutations_disabled": True,
+            "native_bootstrap_disabled": True,
+            "auto_exact_identity_disabled": True,
+            "candidate_methodology": "mapping_rules_v8_changed_token_frequency",
+        })
+        con.execute(
+            "UPDATE er_mapping_passes SET details=? WHERE pass_id=?",
+            [json.dumps(details, sort_keys=True, default=str), pass_id],
+        )
+    finally:
+        con.close()
+
+
 def run_mapping_pass() -> dict:
     # Imports are intentionally local. Importing mapping v8 activates its version-scoped helper
     # hooks, which is appropriate inside the dedicated enrichment execution process but should not
@@ -60,6 +92,7 @@ def run_mapping_pass() -> dict:
         result["identity_mutations_disabled"] = True
         result["native_events_created"] = 0
         result["auto_exact_mappings"] = 0
+        _stamp_execution_provenance(result["pass_id"])
         return result
     finally:
         # Keep the wrapper polite inside long-lived/manual Python processes even though production
