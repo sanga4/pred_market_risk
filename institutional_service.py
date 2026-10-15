@@ -24,11 +24,11 @@ from institutional_changefeed_api import router as changefeed_router
 from institutional_curve_api import router as curve_router
 from institutional_graph_v3 import run_graph_pass
 from institutional_history_api import router as history_router
-from institutional_ingest_v6 import run_once
+from institutional_ingest_v7 import run_once
 from institutional_lifecycle import sync_event_lifecycle
 from institutional_mapping_drift import persist_mapping_drift
 from institutional_mapping_v6 import run_mapping_pass
-from institutional_migrations import ensure_schema
+from institutional_migrations_v2 import ensure_schema
 from institutional_ontology_v2 import run_ontology_pass
 from institutional_ops_api import router as ops_router
 from institutional_qa_v3 import run_qa
