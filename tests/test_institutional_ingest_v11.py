@@ -11,20 +11,23 @@ def text(name: str) -> str:
     return (ROOT / name).read_text()
 
 
-def test_v11_is_registered_bounded_and_not_promoted_before_acceptance():
+def test_v11_is_registered_bounded_and_promoted_after_acceptance():
     body = text("institutional_ingest_v11.py")
     schema = text("institutional_schema_036.sql")
+    promotion = text("institutional_schema_037.sql")
     migrations = text("institutional_migrations_v2.py")
     assert "change_data_capture_v11_prefetched" in body
     assert "change_data_capture_v11_prefetched" in schema
     assert '"institutional_schema_036.sql"' in migrations
+    assert '"institutional_schema_037.sql"' in migrations
     assert "queue.Queue(maxsize=1)" in body
     assert "threading.Thread" in body
     assert "BEGIN TRANSACTION" in body and "ROLLBACK" in body
     assert "collect_seen_ids=False" in body
     assert "streamed_state_pointer_cdc_prefetch1" in body
-    assert "from institutional_ingest_v11 import run_once" not in text("institutional_worker.py")
-    assert "from institutional_ingest_v11 import run_once" not in text("institutional_service.py")
+    assert "hot_path_v2_v11_identity" in promotion
+    assert "from institutional_ingest_v11 import run_once" in text("institutional_worker.py")
+    assert "from institutional_ingest_v11 import run_once" in text("institutional_service.py")
 
 
 def test_prefetch_preserves_order_and_chunk_boundaries():
