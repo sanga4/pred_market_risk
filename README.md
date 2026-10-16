@@ -21,26 +21,30 @@ Interactive documentation:
 https://institutional-api-production-7306.up.railway.app/docs
 ```
 
-Operational health is available at `/health`. The `/v1` surface includes events, point-in-time history and curves, source comparison, event families and term structure, entities, instruments, graph relationships, quality state, releases, and resumable change feeds. WebSocket streaming is exposed at `/v1/stream`.
+Operational health is available publicly at `/health`. The authenticated `/v1` surface includes events, point-in-time history and curves, source comparison, event families and term structure, entities, instruments, graph relationships, quality state, releases, and resumable change feeds. WebSocket streaming is exposed at `/v1/stream`.
+
+Production `/v1/*` requests require an EventRisk API key. Send either `Authorization: Bearer <key>` or `X-API-Key: <key>`.
 
 Example:
 
 ```bash
 BASE=https://institutional-api-production-7306.up.railway.app
-curl -s "$BASE/health" | jq
-curl -s "$BASE/v1/events?status=active&limit=5" | jq
-```
+KEY='er_live_...'
 
-When API authentication is enabled, send either `Authorization: Bearer <key>` or `X-API-Key: <key>`.
+curl -s "$BASE/health" | jq
+curl -s -H "Authorization: Bearer $KEY" \
+  "$BASE/v1/events?status=active&limit=5" | jq
+```
 
 Python:
 
 ```python
+import os
 from eventrisk_sdk import EventRisk
 
 client = EventRisk(
     "https://institutional-api-production-7306.up.railway.app",
-    api_key=None,  # provide a key when production auth is required
+    api_key=os.environ["EVENTRISK_API_KEY"],
 )
 
 events = client.events(limit=20)
@@ -65,7 +69,7 @@ Polymarket APIs ┘                                             │
 verified raw payload bundles ───────────────────────────────────────────> RawArchive
 ```
 
-The institutional warehouse is `event_risk_institutional`. It is populated directly from supported source APIs; `geo_odds` is not the upstream source for this pipeline.
+The production institutional warehouse is `event_risk_institutional`; isolated schema validation uses `event_risk_institutional_staging`. The production warehouse is populated directly from supported source APIs; `geo_odds` is not the upstream source for this pipeline.
 
 Core modules:
 
