@@ -173,7 +173,9 @@ def source_comparison(event_id: str):
                 else (probs_sorted[n // 2 - 1] + probs_sorted[n // 2]) / 2
             )
             summary = {
-                "source_count": len(probs),
+                "source_count": len({r["source_id"] for r in rows}),
+                "priced_source_count": len({r["source_id"] for r in rows if r.get("displayed_probability") is not None}),
+                "priced_contract_count": len(probs),
                 "min": min(probs),
                 "max": max(probs),
                 "median": median,

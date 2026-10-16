@@ -45,6 +45,26 @@ class EventRisk:
     def sources(self):
         return self._get("/v1/sources")
 
+    def explorer_summary(self, *, source=None):
+        return self._get("/v1/explorer/summary", {"source": source})
+
+    def explorer_events(self, *, q=None, theme=None, subject_id=None, source=None, after=None, limit=30):
+        return self._get("/v1/explorer/events", {
+            "q": q, "theme": theme, "subject_id": subject_id, "source": source,
+            "after": after, "limit": limit,
+        })
+
+    def explorer_subjects(self, *, q=None, theme=None, source=None, after=None, limit=30):
+        """Subjects are presentation aliases for existing event families."""
+        return self._get("/v1/explorer/subjects", {
+            "q": q, "theme": theme, "source": source, "after": after, "limit": limit,
+        })
+
+    def event_mappings(self, event_id: str, *, include_expired=False):
+        return self._get(f"/v1/explorer/events/{event_id}/mappings", {
+            "include_expired": str(include_expired).lower(),
+        })
+
     def events(self, *, family_id=None, status="active", category=None, include_unserved=False, limit=100, offset=0):
         return self._get("/v1/events", {
             "family_id": family_id,

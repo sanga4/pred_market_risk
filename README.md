@@ -21,6 +21,23 @@ Interactive documentation:
 https://institutional-api-production-7306.up.railway.app/docs
 ```
 
+Barebones live API explorer:
+
+```text
+https://institutional-api-production-7306.up.railway.app/explorer
+```
+
+Connect using an existing read API key. The key stays in tab memory and is cleared on
+disconnect/reload. Browse the full active universe with search, source/theme filters and
+stable-ID pagination; select an event for contract mappings, current prices, validity,
+methodology and mention evidence. The API inspector shows request paths, timings, request
+IDs and JSON responses, with key-free cURL examples.
+
+In this first explorer, **subjects explicitly mean existing event families**, and **themes
+mean their stored family categories**. Named entity mentions and formal subject assignment
+remain distinct. Security impact/exposure is not inferred. See
+`docs/EXPLORER.md` for endpoint contracts, coverage gaps and acceptance instructions.
+
 Operational health is available publicly at `/health`. The authenticated `/v1` surface includes events, point-in-time history and curves, source comparison, event families and term structure, entities, instruments, graph relationships, quality state, releases, and resumable change feeds. WebSocket streaming is exposed at `/v1/stream`.
 
 Production `/v1/*` requests require an EventRisk API key. Send either `Authorization: Bearer <key>` or `X-API-Key: <key>`.
@@ -48,7 +65,7 @@ client = EventRisk(
 )
 
 events = client.events(limit=20)
-curve = client.event_curve(events["items"][0]["canonical_event_id"], mapping_basis="as_known")
+curve = client.event_curve(events[0]["canonical_event_id"], mapping_basis="as_known")
 ```
 
 ## Institutional architecture
@@ -125,7 +142,7 @@ The original `geo_odds` database is a legacy/read-only source used by the retail
 Install dependencies and run the institutional suite:
 
 ```bash
-pip install -r requirements.txt pytest
+pip install -r requirements-dev.txt
 python -m pytest -q tests
 ```
 

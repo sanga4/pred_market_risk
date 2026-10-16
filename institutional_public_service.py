@@ -18,15 +18,18 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from db import connect
 from institutional_api import router as data_router
 from institutional_auth import authenticate_key, extract_bearer
 from institutional_changefeed_api import router as changefeed_router
 from institutional_curve_api import router as curve_router
+from institutional_explorer_api import router as explorer_router
 from institutional_history_api import router as history_router
 from institutional_public_queries_api import router as public_queries_router
 from institutional_readiness_api import router as readiness_router
@@ -206,6 +209,7 @@ def root():
         "product": "EventRisk Institutional Data API",
         "version": "1.0.0-beta",
         "docs": "/docs",
+        "explorer": "/explorer",
         "health": "/health",
         "readiness": "/v1/readiness",
         "stream": "/v1/stream",
@@ -225,3 +229,22 @@ app.include_router(public_queries_router)
 app.include_router(history_router)
 app.include_router(readiness_router)
 app.include_router(stream_router)
+app.include_router(explorer_router)
+
+EXPLORER_DIR = Path(__file__).resolve().parent / "static" / "explorer"
+app.mount("/explorer-assets", StaticFiles(directory=EXPLORER_DIR), name="explorer-assets")
+
+
+@app.get("/explorer", include_in_schema=False)
+@app.get("/explorer/", include_in_schema=False)
+def explorer():
+    """Public UI shell; data requests retain the same /v1 API-key boundary."""
+    return FileResponse(EXPLORER_DIR / "index.html", headers={
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": (
+            "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+        ),
+    })

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EventRisk · API explorer</title>
+  <meta name="description" content="Explore live EventRisk events, subjects, themes and mapping evidence.">
+  <link rel="stylesheet" href="/explorer-assets/explorer.css">
+  <script src="/explorer-assets/explorer.js" defer></script>
+</head>
+<body>
+  <header>
+    <div><h1>EventRisk <span>API explorer</span></h1><p>Events → Subjects → Themes <span class="muted">→ Securities (reference only)</span></p></div>
+    <nav aria-label="Resources"><a href="/docs" target="_blank" rel="noopener">API docs ↗</a><button id="refresh" hidden>Refresh</button><button id="disconnect" hidden>Disconnect</button></nav>
+  </header>
+  <main>
+    <section class="connection" aria-label="API connection">
+      <div id="health" role="status">Checking service…</div>
+      <form id="connect-form">
+        <label for="api-key">EventRisk API key</label>
+        <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="er_live_…" required>
+        <button type="submit" id="connect">Connect</button>
+        <span class="muted">Uses this API's origin. Key stays in memory until disconnect or reload.</span>
+      </form>
+      <p id="connection-message" class="muted" role="status">Connect with an existing read key to load live data.</p>
+    </section>
+    <div id="error" role="alert" hidden></div>
+    <section id="workspace" hidden>
+      <div id="stats" class="stats" aria-label="Live coverage"></div>
+      <details class="definitions"><summary>What do subjects and themes mean here?</summary><p>Subjects are the API's existing <strong>event families</strong>, grouping related questions or horizons. Themes are their <strong>stored family categories</strong>. These are current taxonomy assignments. Named entity mentions appear separately; they do not fill the formal subject field. This first view stops at themes.</p></details>
+      <form id="filters" class="filters" role="search">
+        <label>Search events or subjects<input id="search" type="search" maxlength="200" placeholder="e.g. Fed, Iran, recession"></label>
+        <label>Source<select id="source"><option value="">All sources</option></select></label>
+        <button type="submit">Search</button><button type="button" id="reset">Clear filters</button>
+        <span id="active-filter" class="muted"></span>
+      </form>
+      <div class="columns">
+        <section class="panel" aria-labelledby="events-heading"><div class="panel-head"><h2 id="events-heading">1. Events</h2><span id="events-count" class="muted"></span></div><div id="events" class="list" aria-live="polite"></div><div class="pager"><button id="events-prev" disabled>Previous</button><button id="events-next" disabled>Next</button><span class="muted">Stable ID order</span></div></section>
+        <section class="panel" aria-labelledby="subjects-heading"><div class="panel-head"><h2 id="subjects-heading">2. Subjects</h2><span class="muted">Event families</span></div><div id="subjects" class="list" aria-live="polite"></div><div class="pager"><button id="subjects-prev" disabled>Previous</button><button id="subjects-next" disabled>Next</button></div></section>
+        <section class="panel" aria-labelledby="themes-heading"><div class="panel-head"><h2 id="themes-heading">3. Themes</h2><button id="all-themes">All</button></div><div id="themes" class="list"></div><p class="panel-note">Choose a theme or subject to filter events. Counts reflect live active events, with the source filter applied.</p></section>
+      </div>
+      <section id="detail" class="detail" aria-live="polite"><p class="muted">Select an event to trace every mapping and inspect its source observations.</p></section>
+      <section class="insights"><h2>Coverage insights</h2><ul id="insights"></ul><p id="snapshot" class="muted"></p></section>
+    </section>
+    <details id="api-inspector" class="inspector"><summary>API calls <span id="call-count">0</span></summary><p class="muted">Requests from this tab, newest first. Select a request for its JSON response. cURL examples use a placeholder for your key.</p><div class="inspector-grid"><div id="calls" class="call-list"></div><div><div class="response-head"><strong id="response-title">Select a request</strong><button id="copy-curl" disabled>Copy cURL</button></div><pre id="response" tabindex="0">No requests selected.</pre></div></div></details>
+  </main>
+  <footer>Kalshi · Polymarket · Current taxonomy. Probabilities remain source observations. <a href="/docs">Point-in-time endpoints</a> support historical research.</footer>
+</body>
+</html>
