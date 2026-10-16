@@ -72,56 +72,86 @@ Clients must be able to exclude inferred edges.
 
 ## Point-in-time behavior
 
-Institutional research requires two different historical questions:
+Institutional research supports two different historical questions:
 
 1. What do we currently believe was true at time T?
 2. What did EventRisk know at time T?
 
-The v1 schema therefore preserves source observation, receipt, processing and validity timestamps. Future API work should add explicit `as_of` modes rather than silently serving revised history.
+The schema preserves source observation, receipt, processing and validity timestamps. Public `as-of`, `as-known`, version and point-in-time history endpoints expose these semantics explicitly instead of silently serving revised history.
 
-## API v1 initial surface
+## Public API v1
 
-Read-only endpoints in `institutional_api.py`:
+The production public service is `institutional_public_service.py`. It is a stateless read/query plane and does not run ingestion, migrations, mapping, enrichment, archive restoration, release generation or key administration.
 
+Core HTTP surfaces include:
+
+- `GET /health` — public operational health probe
+- `GET /v1/sources`
 - `GET /v1/events`
 - `GET /v1/events/{event_id}`
 - `GET /v1/events/{event_id}/history`
+- `GET /v1/events/{event_id}/history-point-in-time`
+- `GET /v1/events/{event_id}/as-of`
+- `GET /v1/events/{event_id}/as-known`
+- `GET /v1/events/{event_id}/versions`
+- `GET /v1/events/{event_id}/curve`
+- `GET /v1/events/{event_id}/curve/latest`
+- `GET /v1/events/{event_id}/source-comparison`
 - `GET /v1/events/{event_id}/relationships`
-- `GET /v1/entities/{entity_id}`
-- `GET /v1/entities/{entity_id}/relationships`
-- `GET /v1/changes`
+- `GET /v1/contracts/{contract_id}`
+- `GET /v1/event-families/{family_id}/versions`
+- `GET /v1/event-families/{family_id}/term-structure`
+- `GET /v1/entities/{entity_id}` and `/relationships`
+- `GET /v1/instruments` and instrument detail/as-of endpoints
+- `GET /v1/graph/{node_id}`
+- `GET /v1/change-feed` (alias `/v1/changes`)
+- `GET /v1/releases` and `/v1/releases/{release_id}`
+- `GET /v1/quality`
+- `GET /v1/readiness` plus observed/identity/enrichment layer endpoints
+- WebSocket `/v1/stream` with an opaque compound resume cursor
 
-Next planned surfaces:
+The FastAPI schema and interactive reference are exposed at `/openapi.json` and `/docs`.
 
-- source contract/version endpoints
-- explicit point-in-time/as-of queries
-- term-structure endpoint
-- mapping-review metadata endpoints
-- bulk Parquet exports
-- streaming/WebSocket change feed
-- authenticated client/service accounts
+### Authentication
 
-## Production gates before institutional use
+Production `/v1/*` HTTP routes require an EventRisk API key when `EVENTRISK_REQUIRE_AUTH=true`; `/health` remains public for infrastructure health checks. Supply a key with either:
 
-- Confirm commercial ingestion/storage/redistribution rights per source
-- Full raw-payload capture enabled for every live adapter
-- Mapping QA and review queue operational
-- Point-in-time reconstruction tests passing
-- Automated source freshness and anomaly checks
-- Staging and production separated
-- API authentication, scopes and key rotation
-- Audit logging
-- Backups and restore test
-- Published data dictionary and revision policy
-- Load/latency testing and observable service-level metrics
-- Security review and vulnerability management
-- Legal/compliance review of data licenses and customer terms
+```text
+Authorization: Bearer er_live_...
+```
 
-## Migration files
+or:
 
-- `institutional_schema.sql` — additive institutional schema
-- `migrate_institutional.py` — schema installer
-- `institutional_backfill.py` — transparent migration of legacy numerical observations and mappings
-- `institutional_api.py` — first read-only institutional API
+```text
+X-API-Key: er_live_...
+```
 
-Do not run the migration against production until it has been exercised against an isolated staging database and the backfill row counts/constraints have been verified.
+WebSocket `/v1/stream` accepts Bearer or `X-API-Key` authentication and supports the `stream` scope. Customer secrets are returned only at creation time; EventRisk stores SHA-256 key digests, not plaintext keys. Public query authentication is read-only and request audit logs contain client IDs rather than secrets.
+
+## Production controls
+
+The institutional production data plane currently enforces or exposes the following controls:
+
+- Direct source-native collection for Kalshi and Polymarket, separate from the legacy retail `ticks` pipeline
+- Immutable raw evidence with verified S3-compatible archive pointers and lossless inline fallback until compaction
+- Lifecycle-aware mapping and point-in-time QA
+- Layered observed, deterministic-identity and advisory-enrichment readiness gates
+- Source freshness, ingestion-volume, lineage, migration-ledger, mapping-cardinality, graph-provenance and raw-durability checks
+- Dedicated `event_risk_institutional_staging` and `event_risk_institutional` databases
+- API authentication, scopes, hashed client keys and key disable/rotation tooling
+- Per-request audit logging and Railway tracing/auto-instrumentation
+- Published data dictionary and explicit revision/provenance semantics
+- Dependency integrity, vulnerability audit, compilation and institutional tests in CI
+- Source redistribution status recorded in `er_sources`; production Kalshi and Polymarket records are marked `licensed` under the commercial entitlement supplied to EventRisk
+
+Commercial terms, customer agreements and legal/compliance approval remain organizational controls outside the codebase and should continue to be reviewed whenever source or distribution terms change.
+
+## Schema and migration model
+
+- `institutional_schema.sql` through `institutional_schema_059.sql` form the additive institutional schema chain.
+- `institutional_migrations_v2.py` is the restart-safe 59-migration installer with checksum-drift protection.
+- Migration discovery is scoped to the active MotherDuck catalog/schema so staging and production can coexist safely in one account.
+- `institutional_backfill.py` preserves transparent legacy numerical observations and mappings without pretending unavailable legacy raw payloads exist.
+- `institutional_public_service.py` is the public stateless read plane.
+
+All schema changes must be exercised against the isolated staging database and pass CI/readiness gates before production promotion.
