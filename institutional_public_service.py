@@ -56,7 +56,11 @@ def _require_warehouse() -> dict:
         missing = []
         for table in REQUIRED_TABLES:
             row = con.execute(
-                "SELECT count(*) FROM information_schema.tables WHERE table_schema='main' AND table_name=?",
+                """SELECT count(*)
+                   FROM information_schema.tables
+                   WHERE table_catalog=current_database()
+                     AND table_schema=current_schema()
+                     AND table_name=?""",
                 [table],
             ).fetchone()
             if not row or int(row[0]) != 1:
