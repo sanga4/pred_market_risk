@@ -69,6 +69,13 @@ def test_public_health_does_not_scan_historical_served_event_view():
     assert "c.active=TRUE" in body
 
 
+def test_public_warehouse_probe_scopes_information_schema_to_current_catalog():
+    body = text("institutional_public_service.py")
+    assert "table_catalog=current_database()" in body
+    assert "table_schema=current_schema()" in body
+    assert "WHERE table_schema='main' AND table_name=?" not in body
+
+
 def test_pure_public_query_router_has_no_write_side_dependencies():
     body = text("institutional_public_queries_api.py")
     for forbidden in [
