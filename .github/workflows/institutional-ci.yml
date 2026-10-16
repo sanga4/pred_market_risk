@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pytest pip-audit
+          pip install -r requirements-dev.txt pip-audit
       - name: Dependency integrity
         run: python -m pip check
       - name: Dependency vulnerability audit
@@ -37,7 +37,7 @@ jobs:
             institutional_reference_versions.py institutional_reference_versions_v2.py institutional_security_master_sync.py \
             institutional_qa.py institutional_qa_v2.py institutional_qa_v3.py institutional_qa_v4.py institutional_qa_v5.py institutional_qa_v6.py institutional_qa_v7.py institutional_qa_v8.py institutional_qa_v9.py institutional_qa_v10.py institutional_qa_v11.py \
             institutional_readiness.py institutional_readiness_v2.py institutional_readiness_v3.py institutional_readiness_v4.py institutional_readiness_v5.py institutional_readiness_v6.py institutional_readiness_api.py \
-            institutional_api.py institutional_curve_api.py institutional_changefeed_api.py institutional_ops_api.py institutional_public_queries_api.py \
+            institutional_api.py institutional_curve_api.py institutional_changefeed_api.py institutional_ops_api.py institutional_public_queries_api.py institutional_explorer_api.py \
             institutional_history_api.py institutional_admin_api.py institutional_auth.py \
             institutional_stream.py institutional_exports.py institutional_exports_v2.py institutional_exports_v3.py institutional_exports_v4.py \
             institutional_run_recovery.py institutional_runtime_lease.py \
@@ -46,3 +46,16 @@ jobs:
             institutional_backfill.py institutional_migrations.py institutional_migrations_v2.py migrate_institutional.py eventrisk_sdk.py
       - name: Run institutional tests
         run: python -m pytest -q tests
+
+  explorer-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated UI test dependencies
+        run: npm ci --prefix tests/ui --ignore-scripts --no-audit --no-fund
+      - name: Exercise explorer interactions
+        run: npm test --prefix tests/ui

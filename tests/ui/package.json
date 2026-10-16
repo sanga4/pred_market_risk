@@ -1,0 +1,6 @@
+{
+  "name": "eventrisk-explorer-ui-tests",
+  "private": true,
+  "scripts": {"test": "node --test explorer.test.cjs"},
+  "devDependencies": {"jsdom": "30.1.3"}
+}

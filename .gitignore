@@ -153,6 +153,9 @@ activemq-data/
 .env
 .envrc
 .venv
+
+# Isolated explorer UI test dependencies
+/tests/ui/node_modules/
 env/
 venv/
 ENV/
