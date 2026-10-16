@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 import os
+import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -35,6 +37,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 log = logging.getLogger("eventrisk.institutional_public_service")
+audit_log = logging.getLogger("eventrisk.audit")
 
 REQUIRED_TABLES = (
     "er_sources",
@@ -92,23 +95,45 @@ app = FastAPI(
 
 @app.middleware("http")
 async def public_boundary_and_auth(request: Request, call_next):
+    started = time.perf_counter()
+    request_id = request.headers.get("x-request-id") or f"req_{uuid.uuid4().hex}"
+    client_id = "anonymous"
+    response = None
+
     if request.url.path == "/internal" or request.url.path.startswith("/internal/"):
-        return JSONResponse({"detail": "Not found"}, status_code=404)
+        response = JSONResponse({"detail": "Not found"}, status_code=404)
+    else:
+        require_auth = os.getenv("EVENTRISK_REQUIRE_AUTH", "false").lower() in {"1", "true", "yes"}
+        if request.url.path.startswith("/v1") and require_auth:
+            supplied = extract_bearer(
+                request.headers.get("authorization"), request.headers.get("x-api-key")
+            )
+            client = authenticate_key(supplied, "read", record_usage=False)
+            if client is None:
+                response = JSONResponse({"detail": "Valid EventRisk API key required"}, status_code=401)
+            else:
+                request.state.eventrisk_client = client
+                client_id = client.get("client_id") or "authenticated"
+        elif request.url.path.startswith("/v1"):
+            client_id = "auth-disabled"
 
-    require_auth = os.getenv("EVENTRISK_REQUIRE_AUTH", "false").lower() in {"1", "true", "yes"}
-    if request.url.path.startswith("/v1") and require_auth:
-        supplied = extract_bearer(
-            request.headers.get("authorization"), request.headers.get("x-api-key")
-        )
-        client = authenticate_key(supplied, "read", record_usage=False)
-        if client is None:
-            return JSONResponse({"detail": "Valid EventRisk API key required"}, status_code=401)
-        request.state.eventrisk_client = client
+        if response is None:
+            response = await call_next(request)
 
-    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
     response.headers["X-EventRisk-Schema-Version"] = "v3.0"
     response.headers["X-EventRisk-Data-Layer"] = "observed+deterministic-identity+advisory-enrichment"
     response.headers["X-EventRisk-Decision-Boundary"] = "data-only"
+    duration_ms = round((time.perf_counter() - started) * 1000.0, 3)
+    audit_log.info(
+        "request_id=%s client_id=%s method=%s path=%s status=%s duration_ms=%s",
+        request_id,
+        client_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
     return response
 
 
