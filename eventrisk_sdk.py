@@ -21,7 +21,7 @@ class EventRisk:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "eventrisk-python/2.1"})
+        self.session.headers.update({"User-Agent": "eventrisk-python/2.2"})
         if api_key:
             self.session.headers["Authorization"] = f"Bearer {api_key}"
 
@@ -109,10 +109,28 @@ class EventRisk:
     def entity(self, entity_id: str):
         return self._get(f"/v1/entities/{entity_id}")
 
-    def entity_relationships(self, entity_id: str, *, include_inferred=False):
+    def entity_relationships(self, entity_id: str, *, include_inferred=False, include_expired=False):
         return self._get(f"/v1/entities/{entity_id}/relationships", {
             "include_inferred": str(include_inferred).lower(),
+            "include_expired": str(include_expired).lower(),
         })
+
+    def instruments(self, *, ticker=None, sector=None, country=None, active=True, after=None, limit=100):
+        """List source-described institutional reference instruments."""
+        return self._get("/v1/instruments", {
+            "ticker": ticker,
+            "sector": sector,
+            "country": country,
+            "active": str(active).lower(),
+            "after": after,
+            "limit": limit,
+        })
+
+    def instrument(self, instrument_id: str):
+        return self._get(f"/v1/instruments/{instrument_id}")
+
+    def instrument_as_of(self, instrument_id: str, at: datetime | str):
+        return self._get(f"/v1/instruments/{instrument_id}/as-of", {"at": self._time(at)})
 
     def graph(self, node_id: str, *, include_inferred=False, limit=500):
         return self._get(f"/v1/graph/{node_id}", {
