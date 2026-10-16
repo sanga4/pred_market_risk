@@ -37,16 +37,35 @@ MIGRATION_FILES = [
 
 
 def _table_exists(con, name: str) -> bool:
-    return bool(con.execute("SELECT count(*) FROM information_schema.tables WHERE table_name=?", [name]).fetchone()[0])
+    return bool(con.execute(
+        """SELECT count(*)
+           FROM information_schema.tables
+           WHERE table_catalog=current_database()
+             AND table_schema=current_schema()
+             AND table_name=?""",
+        [name],
+    ).fetchone()[0])
 
 
 def _view_exists(con, name: str) -> bool:
-    return bool(con.execute("SELECT count(*) FROM information_schema.views WHERE table_name=?", [name]).fetchone()[0])
+    return bool(con.execute(
+        """SELECT count(*)
+           FROM information_schema.views
+           WHERE table_catalog=current_database()
+             AND table_schema=current_schema()
+             AND table_name=?""",
+        [name],
+    ).fetchone()[0])
 
 
 def _column_exists(con, relation: str, column: str) -> bool:
     return bool(con.execute(
-        "SELECT count(*) FROM information_schema.columns WHERE table_name=? AND column_name=?",
+        """SELECT count(*)
+           FROM information_schema.columns
+           WHERE table_catalog=current_database()
+             AND table_schema=current_schema()
+             AND table_name=?
+             AND column_name=?""",
         [relation, column],
     ).fetchone()[0])
 
