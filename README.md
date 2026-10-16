@@ -1,86 +1,138 @@
-# Event Risk MVP
+# EventRisk
 
-Retail event-risk intelligence for equities. Search a ticker and see the unresolved prediction-market events most relevant to it, live probabilities, probability changes, exposure explanations, and—when statistically supported—estimated ticker sensitivity per +1 percentage-point move in event probability.
+EventRisk is an event-data platform built around prediction-market observations from Kalshi and Polymarket. The repository contains two deliberately separated products:
 
-## Production architecture
+1. **Institutional data plane** — immutable raw source lineage, versioned source contracts, canonical events, point-in-time mappings, observed market curves, entity/instrument reference data, provenance-aware graph edges, quality controls, exports, change feeds and a read-only API.
+2. **Retail research UI** — the original equity/event relevance experience backed by the separate `event_risk` MotherDuck database.
 
-The original `geo_odds` database is a read-only MotherDuck share. The MVP uses an owned writable MotherDuck database named `event_risk`; its `ticks` table was seeded from `geo_odds.ticks`, and all new collection/model data is written to `event_risk`.
+The institutional platform is the system to use for new data integrations and downstream institutional applications. It does not prescribe trades, portfolio weights, scenario P&L or investment decisions.
 
-- `collector.py` — Kalshi + Polymarket collection primitives.
-- `collector_runner.py` — production collector; caps Kalshi to the most liquid/relevant 1,000 contracts rather than ingesting its entire open universe.
-- `schema.sql` / `migrate.py` — additive MotherDuck schema.
-- `pipeline.py` — canonical-event, security, market-price and model logic.
-- `pipeline_runner.py` — production-safe market features, history-backed 1h/24h deltas and coefficient SQL.
-- `production_pipeline.py` — applies hardened event classification/relevance to scheduled jobs.
-- `relevance.py` — severity-aware event themes and ticker relevance.
-- `universe.py` — broad U.S. equity search universe (~7k names); only a smaller calibration basket is priced/modelled continuously.
-- `enrich.py` — Polymarket CLOB token metadata.
-- `backfill.py` — historical Polymarket probability backfill.
-- `app.py` / `app_entry.py` / `static/index.html` — FastAPI + responsive retail search UI.
+## Institutional API
 
-## Refresh cadence
+Production base URL:
 
-MotherDuck Flights are the primary scheduler:
-
-- **Every 5 minutes:** collect bounded Kalshi + Polymarket snapshots and rebuild canonical events / market features.
-- **Hourly at :17:** refresh the security universe, Polymarket metadata/history, stock bars, relevance mappings, and coefficients.
-- **Frontend:** the viewed ticker automatically refreshes every minute.
-
-The GitHub Actions workflows are retained as manual fallbacks only.
-
-## Data model
-
-Main tables in `event_risk`:
-
-- `ticks` — append-only raw prediction snapshots
-- `market_metadata`
-- `canonical_events`
-- `event_markets`
-- `market_features`
-- `probability_history`
-- `securities`
-- `ticker_prices`
-- `event_security_map`
-- `market_security_coefficients`
-- `model_runs`
-
-Views:
-
-- `probability_history_all`
-- `ticker_event_feed`
-
-## Model semantics
-
-`beta_per_1pp` is the estimated abnormal ticker return associated with a **+1 percentage-point change in prediction-market probability**, after removing a first-pass SPY market component. It is **not** the predicted stock move if the event itself occurs.
-
-Confidence is deliberately conservative. Coefficients that do not meet sample/significance requirements are marked low-confidence or omitted; the UI says `calibrating` when no coefficient is supportable yet.
-
-The current stock-price source is the public Yahoo chart endpoint for MVP calibration. Replace it with a licensed market-data provider before relying on the product commercially.
-
-## Environment
-
-- `DB=md:event_risk`
-- `MOTHERDUCK_TOKEN=...` for external runtimes such as Railway
-- `PORT` is supplied by Railway
-
-MotherDuck Flights use their built-in MotherDuck execution credential and do not require a copied token.
-
-## Railway
-
-The `web` service deploys `main` and starts:
-
-```bash
-uvicorn app_entry:app --host 0.0.0.0 --port $PORT
+```text
+https://institutional-api-production-7306.up.railway.app
 ```
 
-Railway only needs database read access; scheduled writes/modeling happen inside MotherDuck Flights.
+Interactive documentation:
 
-## Local run
+```text
+https://institutional-api-production-7306.up.railway.app/docs
+```
+
+Operational health is available at `/health`. The `/v1` surface includes events, point-in-time history and curves, source comparison, event families and term structure, entities, instruments, graph relationships, quality state, releases, and resumable change feeds. WebSocket streaming is exposed at `/v1/stream`.
+
+Example:
 
 ```bash
-pip install -r requirements.txt
-DB=event_risk.duckdb python migrate.py
-DB=event_risk.duckdb python collector_runner.py
-DB=event_risk.duckdb python production_pipeline.py all
-DB=event_risk.duckdb uvicorn app_entry:app --reload
+BASE=https://institutional-api-production-7306.up.railway.app
+curl -s "$BASE/health" | jq
+curl -s "$BASE/v1/events?status=active&limit=5" | jq
 ```
+
+When API authentication is enabled, send either `Authorization: Bearer <key>` or `X-API-Key: <key>`.
+
+Python:
+
+```python
+from eventrisk_sdk import EventRisk
+
+client = EventRisk(
+    "https://institutional-api-production-7306.up.railway.app",
+    api_key=None,  # provide a key when production auth is required
+)
+
+events = client.events(limit=20)
+curve = client.event_curve(events["items"][0]["canonical_event_id"], mapping_basis="as_known")
+```
+
+## Institutional architecture
+
+```text
+Kalshi API ─────┐
+                ├─> source adapters ─> immutable raw snapshots ─> source contracts/versions
+Polymarket APIs ┘                                             │
+                                                              ├─> market observations
+                                                              ├─> deterministic canonical identity
+                                                              └─> semantic contract versions
+                                                                        │
+                                                                        ├─> ontology/lifecycle
+                                                                        ├─> provenance graph
+                                                                        ├─> QA/readiness
+                                                                        └─> read-only API/exports/stream
+
+verified raw payload bundles ───────────────────────────────────────────> RawArchive
+```
+
+The institutional warehouse is `event_risk_institutional`. It is populated directly from supported source APIs; `geo_odds` is not the upstream source for this pipeline.
+
+Core modules:
+
+- `institutional_universe_adapters.py` — full-universe Kalshi/Polymarket adapters.
+- `institutional_ingest*.py` / `institutional_worker*.py` — immutable collection and deterministic identity hot path.
+- `institutional_mapping_identity_v1.py` — deterministic canonical identity ownership.
+- `institutional_mapping_advisory_v2.py` — advisory candidate generation that cannot mutate canonical identity.
+- `institutional_ontology_v2.py` / `institutional_lifecycle_v2.py` — deterministic normalization and lifecycle.
+- `institutional_graph_v4.py` — version-aware, provenance-preserving, non-inferential entity mention graph.
+- `institutional_qa_v11.py` — snapshot-safe lifecycle-aware institutional QA.
+- `institutional_archive_v3.py` — bounded, collision-safe, set-wise raw archive maintenance.
+- `institutional_public_service.py` — stateless read-only public service.
+- `eventrisk_sdk.py` — Python client for the public API.
+
+## Data guarantees
+
+The institutional data contract is intentionally conservative:
+
+- source contracts are never silently collapsed;
+- raw observations are append-only;
+- source, receipt and processing clocks are distinct;
+- canonical mappings and semantic metadata are versioned with validity intervals;
+- cross-source disagreement is preserved;
+- revisions are recorded rather than rewritten silently;
+- inferred relationships must be explicitly labelled with methodology/version metadata;
+- a `mentions` relationship is not an `affects` claim;
+- graph edges retain evidence and provenance;
+- historical queries support both current-taxonomy restatement and `as_known` reconstruction;
+- stable EventRisk IDs are primary; external IDs are interoperability mappings;
+- source redistribution entitlement is tracked independently from technical availability.
+
+See `docs/INSTITUTIONAL_DATA_PLATFORM.md` and `docs/DATA_DICTIONARY_V1.md` for the contract and schema semantics.
+
+## Institutional runtime
+
+MotherDuck Flights own scheduled ingestion and enrichment. Railway hosts the stateless public API and the independent raw-archive worker. The public API is not permitted to run ingestion, migrations or background collection.
+
+Raw payloads are first stored with their immutable MotherDuck lineage record. The archive worker writes verified tar.gz bundles to S3-compatible object storage, records bundle/member hashes, and only then may compact the duplicate JSON body from the analytical warehouse. Archive failure leaves the database payload intact.
+
+## Retail application
+
+The original retail application remains isolated in `event_risk` and is served by the Railway `web` service. Its main components are:
+
+- `collector.py` / `collector_runner.py` — bounded retail collection.
+- `pipeline.py` / `pipeline_runner.py` / `production_pipeline.py` — retail event/security features and models.
+- `relevance.py` — retail event/ticker relevance.
+- `app.py` / `app_entry.py` / `static/` — FastAPI retail UI.
+
+The original `geo_odds` database is a legacy/read-only source used by the retail lineage; it is not the institutional live feed.
+
+## Development and CI
+
+Install dependencies and run the institutional suite:
+
+```bash
+pip install -r requirements.txt pytest
+python -m pytest -q tests
+```
+
+Institutional schema installation for a local DuckDB database:
+
+```bash
+DB=event_risk_institutional.duckdb DB_FORCE_READ_WRITE=true python migrate_institutional.py
+```
+
+Never point local development commands at production MotherDuck credentials. Production schema/data changes must go through the controlled migration/worker paths and readiness gates.
+
+## Product boundary
+
+EventRisk supplies observed event-market data, canonical identity, normalized semantics, provenance and explicitly labelled relationships. Downstream institutions remain responsible for scenarios, security-impact models, portfolio construction and investment decisions.
