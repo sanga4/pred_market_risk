@@ -1,8 +1,9 @@
 """Drain or incrementally maintain the institutional raw archive backlog.
 
-Each iteration archives a bounded batch using institutional_archive_v2, so the process
-is resumable and keeps memory bounded. Set RAW_ARCHIVE_RUN_ONCE=true for cron-based
-maintenance; otherwise the worker continues until the backlog is caught up.
+Each iteration archives a bounded batch using institutional_archive_v3, so the process is
+resumable, collision-safe across cron invocations and keeps memory bounded. Set
+RAW_ARCHIVE_RUN_ONCE=true for cron-based maintenance; otherwise the worker continues until the
+backlog is caught up.
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import json
 import os
 import time
 
-from institutional_archive_v2 import archive_pending
+from institutional_archive_v3 import archive_pending
 
 
 def _truthy(name: str, default: str = "false") -> bool:
@@ -47,6 +48,7 @@ def main() -> None:
                 "archived": total_archived,
                 "compacted": total_compacted,
                 "bundles": total_bundles,
+                "archive_version": "v3",
             }), flush=True)
             return
         if pause:
