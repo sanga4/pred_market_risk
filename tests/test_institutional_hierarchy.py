@@ -108,6 +108,10 @@ def test_blind_review_rejects_cherry_picking_and_requires_two_reviewers(warehous
     tampered = copy.deepcopy(payload); tampered["examples"][0]["input_text"] = "changed"
     with pytest.raises(ValueError,match="remain unchanged"): import_review(tampered,con=warehouse)
     assert import_review(payload,con=warehouse)["reviewed"] == 2
+    evaluated = evaluate_gold(payload["dataset_id"],classifier=Classifier(),con=warehouse)
+    assert evaluated["metrics"]["is_independent_production_gold"]
+    assert not evaluated["metrics"]["promotion_gate"]["ready"]
+    with pytest.raises(ValueError,match="blocked"): approve(evaluated["evaluation_id"],"owner","Review",con=warehouse)
     with pytest.raises(ValueError,match="immutable"): import_review(payload,con=warehouse)
     with pytest.raises(ValueError,match="blocked"): approve("not-an-independent-evaluation","owner","Review",con=warehouse)
 

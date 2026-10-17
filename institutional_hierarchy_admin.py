@@ -137,7 +137,9 @@ def evaluate_gold(dataset_id, *, classifier=None, con=None):
         metrics["promotion_gate"] = promotion_gate(metrics)
         evaluation_id = "heval_" + uuid.uuid4().hex
         con.execute("""INSERT INTO er_hierarchy_evaluations(evaluation_id,dataset_id,model_id,metrics_json,predictions_json,evaluation_kind)
-            VALUES (?,?,?,?,?,'human_reviewed_production')""", [evaluation_id,dataset_id,manifest()["model_id"],canonical_json(metrics),canonical_json(predictions)])
+            VALUES (?,?,?,?,?,'human_reviewed_production')""", [evaluation_id,dataset_id,manifest()["model_id"],canonical_json(metrics),canonical_json([
+                {**p,"example_id":e["example_id"],"expected_subject_id":e["subject_id"],"input_hash":digest(e["input_text"])}
+                for e,p in zip(examples,predictions)])])
         return {"evaluation_id": evaluation_id, "metrics": metrics}
     finally:
         if owned:

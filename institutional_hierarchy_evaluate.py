@@ -38,7 +38,7 @@ def run(*, persist=False, classifier=None):
         "sample_design": "Two authored examples per known subject plus eight unknown/adversarial examples; deliberately not production weighted."}
     result = {"dataset_id": dataset["dataset_id"], "model_id": manifest()["model_id"],
               "metrics": metrics,
-              "predictions": [{**example, **prediction} for example, prediction in zip(examples, predictions)]}
+              "predictions": [{**example, **prediction, "expected_subject_id": example["subject_id"]} for example, prediction in zip(examples, predictions)]}
     if persist:
         import pyarrow as pa
         from db import connect
