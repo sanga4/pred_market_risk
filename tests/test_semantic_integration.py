@@ -7,7 +7,7 @@ import pytest
 
 
 @pytest.mark.skipif(os.getenv("EVENTRISK_RUN_SEMANTIC_INTEGRATION") != "true", reason="Real model runs in dedicated pinned-dependency CI job")
-def test_real_pinned_weights_repeat_frozen_decisions_across_batch_sizes():
+def test_real_pinned_weights_repeat_frozen_decisions_across_batch_sizes(monkeypatch):
     from institutional_semantic_model import SemanticClassifier, manifest
     from institutional_hierarchy_evaluate import challenge_examples
     from institutional_hierarchy_metrics import stability
@@ -23,3 +23,7 @@ def test_real_pinned_weights_repeat_frozen_decisions_across_batch_sizes():
     repeated = classifier.predict(texts,batch_size=1)
     assert stability(actual,repeated)["subject_agreement"] == 1
     assert stability(actual,repeated)["theme_agreement"] == 1
+    monkeypatch.setenv("EVENTRISK_MODEL_THREADS","4")
+    parallel = SemanticClassifier().predict(texts)
+    assert stability(actual,parallel)["subject_agreement"] == 1
+    assert stability(actual,parallel)["theme_agreement"] == 1

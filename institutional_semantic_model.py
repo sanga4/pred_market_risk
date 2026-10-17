@@ -82,7 +82,7 @@ class SemanticClassifier:
         self.tokenizer.enable_truncation(max_length=MAX_TOKENS)
         self.tokenizer.enable_padding()
         options = ort.SessionOptions()
-        options.intra_op_num_threads = max(1, min(2, int(os.environ.get("EVENTRISK_MODEL_THREADS", "2"))))
+        options.intra_op_num_threads = max(1, min(4, int(os.environ.get("EVENTRISK_MODEL_THREADS", "2"))))
         options.inter_op_num_threads = 1
         options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         self.session = ort.InferenceSession(str(root / "model.onnx"), sess_options=options, providers=["CPUExecutionProvider"])

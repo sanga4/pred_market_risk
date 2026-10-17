@@ -28,9 +28,9 @@ def main():
         os.environ["DB"] = "md:" + database
         os.environ["DB_FORCE_READ_WRITE"] = "true"
         os.environ["ENABLE_BACKGROUND_COLLECTOR"] = "false"
-        os.environ["EVENTRISK_MODEL_THREADS"] = "2"
+        os.environ.setdefault("EVENTRISK_MODEL_THREADS", "2")
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
-        os.environ["OMP_NUM_THREADS"] = "2"
+        os.environ.setdefault("OMP_NUM_THREADS", "2")
         os.environ["TOKENIZERS_PARALLELISM"] = "false"
         os.environ["PYTHONPATH"] = str(repo)
         os.chdir(repo); sys.path.insert(0,str(repo))

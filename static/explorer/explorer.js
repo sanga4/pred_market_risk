@@ -330,8 +330,19 @@
       if (benchmark) {
         const m = benchmark.metrics;
         lines.push(`Authored challenge (${fmt(m.subject.n)} examples; not independent production gold): subject accuracy ${pct(m.subject.accuracy)}, macro precision ${pct(m.subject.macro_precision)}, macro recall ${pct(m.subject.macro_recall)}, macro F1 ${pct(m.subject.macro_f1)}; theme accuracy ${pct(m.theme.accuracy)}; abstention ${pct(m.abstention_rate)}.`, `Batch-size repeatability: ${pct(m.repeatability?.subject_agreement)} subject agreement on this challenge. Cosine scores are uncalibrated.`);
+        lines.push(`Selective precision ${pct(m.selective_precision)}; selective recall ${pct(m.selective_recall)}; top-three known-subject recall ${pct(m.top_3_subject_recall_known)}; unknown detection recall ${pct(m.unknown_detection_recall)}; unknown false-accept rate ${pct(m.unknown_false_accept_rate)}.`);
       }
       $("quality").replaceChildren(...lines.map(line => node("p", line)));
+      if (benchmark) {
+        const details = node("details", null, "evidence"), table = node("table"), header = node("tr"), head = node("thead"), body = node("tbody"), wrap = node("div", null, "table-wrap");
+        details.append(node("summary", "Per-subject authored challenge metrics · small samples, not production gold"));
+        for (const label of ["Subject", "Precision", "Recall", "F1", "Labeled cases"]) header.append(node("th", label));
+        head.append(header); table.append(head);
+        for (const [id, metric] of Object.entries(benchmark.metrics.subject.per_class || {})) {
+          const row = node("tr"); row.append(node("td", human(id)), node("td", pct(metric.precision)), node("td", pct(metric.recall)), node("td", pct(metric.f1)), node("td", fmt(metric.support))); body.append(row);
+        }
+        table.append(body); wrap.append(table); details.append(wrap); $("quality").append(details);
+      }
     } catch (error) { if (version === sessionVersion) { $("quality").textContent = error.message; if (error.status === 401) handleError(error); } }
     finally { $("quality-refresh").disabled = false; }
   }
