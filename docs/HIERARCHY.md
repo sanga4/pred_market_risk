@@ -65,10 +65,17 @@ No destructive core migration is required. The public API never initializes sche
 downloads weights, runs inference or writes usage records.
 
 Inference is bounded and resumable, with disjoint input-hash partitions and bulk
-cache writes. Projection uses a lease and a single transaction. A crash rolls back
+cache writes. The inference loop yields after a 420-second budget, retaining its cache
+and reporting whether the selection completed. CPU thread caps and title-length
+bucketing reduce oversubscription and padding; row order is restored before scoring. Projection uses a lease and a single transaction. A crash rolls back
 the assignment change; a retry reuses cached predictions. Leases expire after 15
 minutes; configured Flight runtime is at most 10 minutes. Normal completion releases
 the lease immediately. Operators should not overlap different partition layouts.
+A stopped-worker recovery operation requires separately confirmed terminal Flight
+status, the exact run and lease owner, and an audit record; it cannot expire a live
+worker by age alone. The initial three backfill runs were deliberately stopped to
+apply runtime/thread controls; their committed cache was preserved and leases were
+recovered only after MotherDuck reported each run CANCELLED.
 
 An unchanged input/model uses its persisted output. A title or model change creates
 a new version. An override survives replay for the reviewed input hash, but cannot

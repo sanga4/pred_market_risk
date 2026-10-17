@@ -114,11 +114,14 @@ def infer(*, max_rows=50000, partition_id=0, partition_count=1, classifier=None,
             from institutional_semantic_model import SemanticClassifier
             classifier = SemanticClassifier()
         import pyarrow as pa
-        for begin in range(0, len(pending), 2000):
-            if processed and time.monotonic() - started >= max_seconds:
+        prior_batch_seconds = 0
+        for begin in range(0, len(pending), 5000):
+            if processed and time.monotonic() - started + prior_batch_seconds * 1.5 >= max_seconds:
                 break
-            batch = pending[begin:begin + 2000]
+            batch_started = time.monotonic()
+            batch = pending[begin:begin + 5000]
             outputs = classifier.predict([item["input_text"] for item in batch])
+            inference_seconds = time.monotonic() - batch_started
             if len(outputs) != len(batch):
                 raise RuntimeError("Classifier output cardinality mismatch")
             staged = []
@@ -147,7 +150,11 @@ def infer(*, max_rows=50000, partition_id=0, partition_count=1, classifier=None,
             finally:
                 con.unregister("_hierarchy_predictions")
             processed += len(batch)
-            print(canonical_json({"run_id": run_id, "partition": partition_id, "processed": processed, "selected": len(pending)}), flush=True)
+            prior_batch_seconds = time.monotonic() - batch_started
+            print(canonical_json({"run_id": run_id, "partition": partition_id, "processed": processed, "selected": len(pending),
+                "batch_inference_seconds": round(inference_seconds,3),
+                "batch_persistence_seconds": round(prior_batch_seconds-inference_seconds,3),
+                "elapsed_seconds": round(time.monotonic()-started,3)}), flush=True)
         result = {"run_id": run_id, "model_id": model_id, "inputs_processed": processed,
                   "inputs_selected": len(pending), "selection_complete": processed == len(pending),
                   "implementation_git_ref": os.environ.get("EVENTRISK_GIT_REF"),
