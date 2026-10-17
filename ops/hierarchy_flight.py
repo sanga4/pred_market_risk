@@ -16,7 +16,7 @@ def main():
         raise ValueError("Pin an immutable full Git commit SHA")
     if database not in {"event_risk_institutional", "event_risk_institutional_staging"}:
         raise ValueError("Unrecognized hierarchy database")
-    if operation not in {"init", "infer", "project", "cycle", "evaluate", "accept", "seed-staging", "export-review"}:
+    if operation not in {"init", "infer", "project", "cycle", "evaluate", "accept", "seed-staging", "export-review", "recover-stopped"}:
         raise ValueError("Unrecognized hierarchy operation")
     if operation == "seed-staging" and database != "event_risk_institutional_staging":
         raise ValueError("Staging seed must never target production")
@@ -29,6 +29,9 @@ def main():
         os.environ["DB_FORCE_READ_WRITE"] = "true"
         os.environ["ENABLE_BACKGROUND_COLLECTOR"] = "false"
         os.environ["EVENTRISK_MODEL_THREADS"] = "2"
+        os.environ["OPENBLAS_NUM_THREADS"] = "1"
+        os.environ["OMP_NUM_THREADS"] = "2"
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
         os.environ["PYTHONPATH"] = str(repo)
         os.chdir(repo); sys.path.insert(0,str(repo))
         from db import connect
@@ -37,6 +40,9 @@ def main():
             from institutional_hierarchy_worker import main as worker
             sys.argv = ["institutional_hierarchy_worker.py",operation]
             worker()
+        elif operation == "recover-stopped":
+            from institutional_hierarchy_worker import recover_stopped
+            print(canonical_json(recover_stopped(json.loads(os.environ["HIERARCHY_STOPPED_RUNS"]))),flush=True)
         elif operation == "evaluate":
             from institutional_hierarchy_evaluate import run
             result = run(persist=True)

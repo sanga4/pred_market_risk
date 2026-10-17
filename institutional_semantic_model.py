@@ -100,8 +100,12 @@ class SemanticClassifier:
         np = self.np
         chunks = []
         names = {v.name for v in self.session.get_inputs()}
-        for begin in range(0, len(texts), batch_size):
-            encoded = self.tokenizer.encode_batch(list(texts[begin:begin + batch_size]))
+        # Length bucketing reduces padding work for mixed short/long source titles.
+        # Restore original row order before scoring; no input or policy is changed.
+        order = sorted(range(len(texts)), key=lambda i: (len(texts[i]), i))
+        ordered = [texts[i] for i in order]
+        for begin in range(0, len(ordered), batch_size):
+            encoded = self.tokenizer.encode_batch(ordered[begin:begin + batch_size])
             feed = {
                 "input_ids": np.asarray([e.ids for e in encoded], dtype=np.int64),
                 "attention_mask": np.asarray([e.attention_mask for e in encoded], dtype=np.int64),
@@ -112,7 +116,7 @@ class SemanticClassifier:
             mask = feed["attention_mask"][..., None].astype(np.float32)
             pooled = (tokens * mask).sum(axis=1) / np.maximum(mask.sum(axis=1), 1e-9)
             chunks.append(pooled / np.maximum(np.linalg.norm(pooled, axis=1, keepdims=True), 1e-9))
-        return np.concatenate(chunks) if chunks else np.empty((0, 384), dtype=np.float32)
+        return np.concatenate(chunks)[np.argsort(order)] if chunks else np.empty((0, 384), dtype=np.float32)
 
     def predict(self, texts, batch_size=64, full_scores=False):
         np = self.np

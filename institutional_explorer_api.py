@@ -201,6 +201,9 @@ def mappings(event_id: str, include_expired: bool = False):
             from institutional_semantic_model import digest
             hierarchy_mapping["input_is_current"] = hierarchy_mapping["input_hash"] == digest(event["canonical_name"])
             hierarchy_mapping["evidence"] = json.loads(hierarchy_mapping.pop("evidence_json"))
+            override_id = hierarchy_mapping["evidence"].get("override_id")
+            review = rows_dict(con.execute("SELECT override_id,reviewer,reason,valid_from,valid_to FROM er_hierarchy_overrides WHERE override_id=?", [override_id])) if override_id else []
+            hierarchy_mapping["review"] = review[0] if review else None
             raw_output = hierarchy_mapping.pop("output_json", None)
             hierarchy_mapping["model_output"] = json.loads(raw_output) if raw_output else None
         current = "" if include_expired else "AND m.valid_from<=now() AND m.valid_to IS NULL"

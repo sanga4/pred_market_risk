@@ -2,10 +2,12 @@
 import json
 from datetime import datetime, timezone
 from institutional_api import rows_dict
+from institutional_semantic_model import manifest
 
 
 def operational_metrics(con):
     measured_at = datetime.now(timezone.utc)
+    model_id = manifest()["model_id"]
     coverage = rows_dict(con.execute("""
         SELECT count(*) AS canonical_events,
                count(h.mapping_id) AS mapped_events,
@@ -14,12 +16,12 @@ def operational_metrics(con):
                count(*) FILTER(WHERE h.assignment_status='model_assigned_provisional') AS provisional_events,
                count(*) FILTER(WHERE h.review_status='human_reviewed') AS human_reviewed_events,
                count(*) FILTER(WHERE h.input_hash IS DISTINCT FROM sha256(e.canonical_name)) AS stale_input_events,
+               count(*) FILTER(WHERE h.model_id IS NOT NULL AND h.model_id<>?) AS different_model_events,
                count(*) FILTER(WHERE e.status='active') AS active_events,
                count(*) FILTER(WHERE e.status='active' AND h.mapping_id IS NULL) AS active_unmapped_events
         FROM er_canonical_events e LEFT JOIN er_hierarchy_current h USING(canonical_event_id)
-    """))[0]
-    model = rows_dict(con.execute("SELECT * FROM er_hierarchy_models ORDER BY created_at DESC,model_id DESC LIMIT 1"))
-    model_id = model[0]["model_id"] if model else None
+    """, [model_id]))[0]
+    model = rows_dict(con.execute("SELECT * FROM er_hierarchy_models WHERE model_id=?", [model_id]))
     pending_inputs = int(con.execute("""SELECT count(*) FROM (
         SELECT DISTINCT sha256(e.canonical_name) AS input_hash FROM er_canonical_events e
         LEFT JOIN er_hierarchy_prediction_cache c ON c.input_hash=sha256(e.canonical_name) AND c.model_id=?
@@ -71,7 +73,7 @@ def operational_metrics(con):
     return {
         "measured_at": measured_at,
         "coverage": coverage, "pending_distinct_inputs": pending_inputs, "integrity": integrity,
-        "structurally_ready": not any(integrity.values()) and coverage["mapped_events"] == coverage["canonical_events"] and coverage["stale_input_events"] == 0,
+        "structurally_ready": not any(integrity.values()) and coverage["mapped_events"] == coverage["canonical_events"] and coverage["stale_input_events"] == 0 and coverage["different_model_events"] == 0,
         "inference_complete": pending_inputs == 0 and coverage["pending_events"] == 0,
         "institutional_validation_ready": bool(gold_gate.get("ready")) and approved,
         "validation_gate": {**gold_gate, "explicit_model_approval": approved},

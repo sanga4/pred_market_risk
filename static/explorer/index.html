@@ -26,6 +26,7 @@
     </section>
     <div id="error" role="alert" hidden></div>
     <section id="workspace" hidden>
+      <p class="notice">Provisional semantic mappings · Independent production accuracy is awaiting human validation.</p>
       <div id="stats" class="stats" aria-label="Live coverage"></div>
       <details class="definitions"><summary>What do subjects and themes mean here?</summary><p>Subjects are <strong>semantic topics</strong> inferred by a pinned sentence transformer, with explicit abstention when uncertain. Each subject has one <strong>governed theme</strong> in a versioned catalog. Event families and named entity mentions remain separate. Model assignments are provisional until independently reviewed. Similarity scores are not probabilities. This view stops at themes.</p></details>
       <details class="definitions" id="quality-panel"><summary>Mapping quality &amp; validation</summary><p class="notice">Provisional model. Independent production precision and recall require a blinded, human-reviewed test set.</p><button id="quality-refresh" type="button">Refresh mapping metrics</button><button id="review-download" type="button">Download blinded review sample</button><p id="review-download-status" class="muted" role="status"></p><div id="quality" aria-live="polite">Connect to view measured coverage, stability and benchmark results.</div></details>

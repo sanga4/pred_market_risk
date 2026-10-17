@@ -238,6 +238,7 @@
       const dl = node("dl");
       for (const [label, value] of [["Mapping ID", mapping.mapping_id], ["Model", mapping.model_id], ["Validation", mapping.model_validation_status], ["Method", mapping.method_version], ["Input SHA256", mapping.input_hash], ["Cosine similarity (not probability)", mapping.similarity == null ? "—" : Number(mapping.similarity).toFixed(3)], ["Top candidate margin", mapping.margin == null ? "—" : Number(mapping.margin).toFixed(3)], ["Decision reason", mapping.model_output?.reason || mapping.assignment_status], ["Valid from", date(mapping.valid_from)]]) dl.append(node("dt", label), node("dd", value));
       evidence.append(dl, node("blockquote", mapping.evidence?.title || "No title evidence"));
+      if (mapping.review) evidence.append(node("p", `Reviewed by ${mapping.review.reviewer}: ${mapping.review.reason}`));
       for (const candidate of mapping.model_output?.top_candidates || []) evidence.append(node("div", `${human(candidate.subject_id)} · ${Number(candidate.similarity).toFixed(3)}`, "muted"));
       root.append(evidence);
     }

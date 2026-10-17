@@ -41,11 +41,52 @@ def _finish(con, _run_id, status, **details):
     ])
 
 
-def infer(*, max_rows=50000, partition_id=0, partition_count=1, classifier=None):
+def recover_stopped(records):
+    """Operator recovery after separately verifying Flight terminal status.
+
+    Never expire a live worker by age alone. Exact owner/run matching protects any
+    replacement process that acquired the lane while recovery was being prepared.
+    """
+    con = connect()
+    recovered = []
+    try:
+        con.execute("BEGIN")
+        try:
+            for record in records:
+                if record.get("confirmed_terminal") is not True or record.get("terminal_status") not in {"CANCELLED", "FAILED"} or not isinstance(record.get("flight_run_number"), int):
+                    raise ValueError("Verify and record the terminal Flight run before recovering its lease")
+                row = con.execute("SELECT partition_id,partition_count,model_id,status FROM er_hierarchy_runs WHERE run_id=? AND operation='inference'", [record["run_id"]]).fetchone()
+                if not row:
+                    raise ValueError("Unknown inference run")
+                lane = f"hierarchy_inference_{row[1]}_{row[0]}"
+                owner = con.execute("SELECT owner_id FROM er_runtime_leases WHERE lease_name=?", [lane]).fetchone()
+                if not owner or owner[0] is None:
+                    continue
+                if owner[0] != record["expected_owner_id"] or row[3] != "running":
+                    raise ValueError("Lease/run changed; inspect the replacement owner before recovery")
+                chars = "".join(c for i,c in enumerate("0123456789abcdef") if i % row[1] == row[0])
+                cached = con.execute("SELECT count(*) FROM er_hierarchy_prediction_cache WHERE model_id=? AND contains(?,substr(input_hash,1,1))", [row[2],chars]).fetchone()[0]
+                con.execute("""UPDATE er_runtime_leases SET owner_id=NULL,acquired_at=NULL,heartbeat_at=NULL,
+                    expires_at=NULL,last_released_at=now() WHERE lease_name=? AND owner_id=?""", [lane,record["expected_owner_id"]])
+                con.execute("""INSERT INTO er_runtime_lease_events(lease_event_id,lease_name,owner_id,event_type,occurred_at,metadata)
+                    VALUES (?,?,?,'stopped_worker_recovered',now(),?)""", ["leaseevt_"+uuid.uuid4().hex,lane,record["expected_owner_id"],canonical_json(record)])
+                _finish(con,record["run_id"],"interrupted",inputs_processed=cached,recovery=record)
+                recovered.append(record["run_id"])
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK"); raise
+        return {"recovered_runs": recovered}
+    finally:
+        con.close()
+
+
+def infer(*, max_rows=50000, partition_id=0, partition_count=1, classifier=None, max_seconds=420):
     if partition_count not in {1, 2, 4, 8, 16} or not 0 <= partition_id < partition_count:
         raise ValueError("Use a valid input-hash partition: count=1,2,4,8,16")
     if not 1 <= max_rows <= 250000:
         raise ValueError("max_rows must be 1–250000")
+    if not 1 <= max_seconds <= 480:
+        raise ValueError("Inference budget must be 1–480 seconds within the Flight timeout")
     model = manifest()
     model_id = model["model_id"]
     lease = _lease(f"hierarchy_inference_{partition_count}_{partition_id}")
@@ -74,6 +115,8 @@ def infer(*, max_rows=50000, partition_id=0, partition_count=1, classifier=None)
             classifier = SemanticClassifier()
         import pyarrow as pa
         for begin in range(0, len(pending), 2000):
+            if processed and time.monotonic() - started >= max_seconds:
+                break
             batch = pending[begin:begin + 2000]
             outputs = classifier.predict([item["input_text"] for item in batch])
             if len(outputs) != len(batch):
@@ -106,6 +149,8 @@ def infer(*, max_rows=50000, partition_id=0, partition_count=1, classifier=None)
             processed += len(batch)
             print(canonical_json({"run_id": run_id, "partition": partition_id, "processed": processed, "selected": len(pending)}), flush=True)
         result = {"run_id": run_id, "model_id": model_id, "inputs_processed": processed,
+                  "inputs_selected": len(pending), "selection_complete": processed == len(pending),
+                  "implementation_git_ref": os.environ.get("EVENTRISK_GIT_REF"),
                   "elapsed_seconds": round(time.monotonic() - started, 3),
                   "titles_per_second": round(processed / max(time.monotonic() - started, 1e-6), 3)}
         _finish(con, run_id, "success", **result)

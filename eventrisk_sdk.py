@@ -72,7 +72,7 @@ class EventRisk:
         return self._get("/v1/hierarchy/taxonomy", {"version": version})
 
     def event_hierarchy(self, event_id: str, *, at=None):
-        return self._get(f"/v1/hierarchy/events/{event_id}", {"at": at})
+        return self._get(f"/v1/hierarchy/events/{event_id}", {"at": self._time(at)})
 
     def hierarchy_review_queue(self, *, after=None, limit=50, abstained_only=True):
         return self._get("/v1/hierarchy/review", {"after": after, "limit": limit, "abstained_only": str(abstained_only).lower()})

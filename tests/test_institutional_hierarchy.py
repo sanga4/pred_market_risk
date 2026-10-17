@@ -80,6 +80,9 @@ def test_review_override_is_preserved_and_invalidated_when_title_changes(warehou
     override("e1","consumer_prices","second analyst","New supporting evidence",expected_input_hash=digest("Fed rate cut in December?"),con=con)
     assert project()["mappings_changed"] == 1
     assert "second analyst" == con.execute("SELECT reviewer FROM er_hierarchy_overrides WHERE valid_to IS NULL AND canonical_event_id='e1'").fetchone()[0]
+    from institutional_hierarchy_api import event_hierarchy
+    reviewed = event_hierarchy("e1")["mapping"]["review"]
+    assert reviewed["reviewer"] == "second analyst" and reviewed["reason"] == "New supporting evidence"
     con.execute("UPDATE er_canonical_events SET canonical_name='Fed leadership change?' WHERE canonical_event_id='e1'")
     infer(classifier=Classifier()); project()
     assert con.execute("SELECT review_status FROM er_hierarchy_current WHERE canonical_event_id='e1'").fetchone()[0] == "unreviewed"
@@ -90,6 +93,19 @@ def test_hash_partitions_cover_inputs_once(warehouse):
     total = sum(infer(partition_id=i,partition_count=4,classifier=classifier)["inputs_processed"] for i in range(4))
     assert total == classifier.calls == 2
     with pytest.raises(ValueError): infer(partition_count=3,classifier=classifier)
+
+
+def test_stopped_worker_recovery_requires_terminal_evidence_and_exact_owner(warehouse):
+    from institutional_hierarchy_worker import _lease, recover_stopped
+    lease = _lease("hierarchy_inference_4_0")
+    warehouse.execute("INSERT INTO er_hierarchy_runs(run_id,operation,model_id,partition_id,partition_count,status) VALUES ('interrupted-test','inference',?,0,4,'running')", [manifest()["model_id"]])
+    record = {"run_id":"interrupted-test","expected_owner_id":lease.owner_id,"flight_run_number":8,"terminal_status":"CANCELLED"}
+    with pytest.raises(ValueError,match="terminal Flight"): recover_stopped([record])
+    record["confirmed_terminal"] = True
+    with pytest.raises(ValueError,match="owner"): recover_stopped([{**record,"expected_owner_id":"replacement"}])
+    assert recover_stopped([record])["recovered_runs"] == ["interrupted-test"]
+    assert warehouse.execute("SELECT status FROM er_hierarchy_runs WHERE run_id='interrupted-test'").fetchone()[0] == "interrupted"
+    assert recover_stopped([record])["recovered_runs"] == []
 
 
 def test_blind_review_rejects_cherry_picking_and_requires_two_reviewers(warehouse):

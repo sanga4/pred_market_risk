@@ -92,6 +92,9 @@ def event_hierarchy(event_id: str, at: Optional[datetime] = None):
             raise HTTPException(503, "Hierarchy interval integrity failure")
         row = rows[0]
         row["evidence"] = json.loads(row.pop("evidence_json"))
+        override_id = row["evidence"].get("override_id")
+        review = rows_dict(con.execute("SELECT override_id,reviewer,reason,valid_from,valid_to FROM er_hierarchy_overrides WHERE override_id=?", [override_id])) if override_id else []
+        row["review"] = review[0] if review else None
         output = row.pop("output_json")
         row["model_output"] = json.loads(output) if output else None
         return {"mapping": row, "as_known_at": at, "basis": "processing-time hierarchy validity; no backdated model knowledge"}
