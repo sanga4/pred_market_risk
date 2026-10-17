@@ -169,6 +169,7 @@ def project():
                    OR m.model_id IS DISTINCT FROM d.model_id OR m.input_hash IS DISTINCT FROM d.input_hash
                    OR m.assignment_status IS DISTINCT FROM d.assignment_status OR m.review_status IS DISTINCT FROM d.review_status
                    OR m.source_event_family_id IS DISTINCT FROM d.source_event_family_id
+                   OR json_extract_string(m.evidence_json,'$.override_id') IS DISTINCT FROM json_extract_string(d.evidence_json,'$.override_id')
             """)
             changed = int(con.execute("SELECT count(*) FROM _hierarchy_changes").fetchone()[0])
             con.execute("""UPDATE er_hierarchy_event_subject_mappings m SET valid_to=now()

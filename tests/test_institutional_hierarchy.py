@@ -77,6 +77,9 @@ def test_review_override_is_preserved_and_invalidated_when_title_changes(warehou
     override("e1","consumer_prices","analyst","Reviewed source",expected_input_hash=digest("Fed rate cut in December?"),con=con)
     project(); project()
     assert con.execute("SELECT subject_id,theme_id,review_status FROM er_hierarchy_current WHERE canonical_event_id='e1'").fetchone() == ("consumer_prices","inflation","human_reviewed")
+    override("e1","consumer_prices","second analyst","New supporting evidence",expected_input_hash=digest("Fed rate cut in December?"),con=con)
+    assert project()["mappings_changed"] == 1
+    assert "second analyst" == con.execute("SELECT reviewer FROM er_hierarchy_overrides WHERE valid_to IS NULL AND canonical_event_id='e1'").fetchone()[0]
     con.execute("UPDATE er_canonical_events SET canonical_name='Fed leadership change?' WHERE canonical_event_id='e1'")
     infer(classifier=Classifier()); project()
     assert con.execute("SELECT review_status FROM er_hierarchy_current WHERE canonical_event_id='e1'").fetchone()[0] == "unreviewed"
