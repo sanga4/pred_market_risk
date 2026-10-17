@@ -33,6 +33,11 @@ def main():
             return response.json()
 
         assert client.get("/v1/explorer/summary").status_code == 401
+        assert client.get("/v1/hierarchy/metrics").status_code == 401
+        quality = get("/v1/hierarchy/metrics")
+        assert not any(quality["integrity"].values())
+        assert len(get("/v1/hierarchy/taxonomy")["definition"]["subjects"]) == 54
+        get("/v1/hierarchy/review",limit=2)
         summary = get("/v1/explorer/summary")
         assert summary["coverage"]["events"] > 0
         assert sum(t["event_count"] for t in summary["themes"]) == summary["coverage"]["events"]
@@ -49,6 +54,10 @@ def main():
         event_id = first["items"][0]["canonical_event_id"]
         detail = get(f"/v1/explorer/events/{event_id}/mappings")
         assert detail["event"]["canonical_event_id"] == event_id
+        assert detail["hierarchy_mapping"]
+        hierarchy = get(f"/v1/hierarchy/events/{event_id}")
+        assert hierarchy["mapping"]["subject_id"] == detail["subject"]["subject_id"]
+        assert hierarchy["mapping"]["theme_id"] == detail["theme"]["theme_id"]
         assert detail["source_contracts"]
         assert all(m["valid_to"] is None for m in detail["source_contracts"])
         filtered = get("/v1/explorer/events", theme="rates", source="kalshi", limit=2)
@@ -78,7 +87,7 @@ def main():
             response = requests.get(base + path, timeout=45)
             assert response.status_code == 200, (path, response.status_code)
             print("deployed_public", path, response.status_code, flush=True)
-        for path in ("/v1/explorer/summary", "/v1/explorer/events", "/v1/explorer/subjects"):
+        for path in ("/v1/explorer/summary", "/v1/explorer/events", "/v1/explorer/subjects", "/v1/hierarchy/metrics", "/v1/hierarchy/taxonomy", "/v1/hierarchy/review-datasets"):
             assert requests.get(base + path, timeout=45).status_code == 401, path
         print("DEPLOYED_EXPLORER_AUTH_BOUNDARY_OK", flush=True)
     print("EXPLORER_WAREHOUSE_ACCEPTANCE_OK", flush=True)

@@ -1,9 +1,7 @@
-"""Read-only discovery of the existing event -> family -> category hierarchy.
+"""Read-only discovery of the persisted versioned semantic hierarchy.
 
-The explorer calls event families "subjects" and stored family categories "themes".
-Those are presentation aliases, not a claim that subject_entity_id has been populated
-or that an entity mention establishes a causal/security relationship. No schema or
-identity is changed here. Discovery touches current state, never observation history.
+Events map to semantic topic subjects, which map to governed themes. The original
+event-family and named-entity layers remain separate. Public queries never infer or write.
 """
 
 from __future__ import annotations
@@ -19,8 +17,8 @@ router = APIRouter(prefix="/v1/explorer", tags=["institutional-explorer"])
 
 DEFINITIONS = {
     "event": "A canonical EventRisk outcome with at least one active source contract.",
-    "subject": "An existing event family: a normalized grouping of related questions or horizons, not proof of event equivalence.",
-    "theme": "The subject family's stored category. Rule-based taxonomy, not a reviewed causal relationship; 'other' and 'unclassified' retain their original meaning.",
+    "subject": "A stable semantic topic assigned by the pinned transformer or an explicit reviewed override. Event families remain separate related-question groups.",
+    "theme": "The subject's governed parent in an immutable versioned taxonomy. Uncertain event-to-subject decisions explicitly abstain; model scores are similarities, not probabilities.",
     "entity_mention": "A separately evidenced source assertion. A mention does not establish the event's formal subject or a security impact.",
     "securities": "Reference instruments are separate. This explorer stops at themes; it does not infer security exposure.",
 }
@@ -34,13 +32,14 @@ def _live(*, q=None, theme=None, subject_id=None, source=None):
     params = []
     if q:
         where.append("(contains(lower(e.canonical_name),lower(?)) OR "
+                     "contains(lower(coalesce(h.subject_name,'')),lower(?)) OR "
                      "contains(lower(coalesce(f.canonical_name,'')),lower(?)) OR e.canonical_event_id=?)")
-        params.extend([q, q, q])
+        params.extend([q, q, q, q])
     if theme:
-        where.append("coalesce(nullif(f.category,''),'unclassified')=?")
+        where.append("coalesce(h.theme_id,'unclassified')=?")
         params.append(theme)
     if subject_id:
-        where.append("f.event_family_id=?")
+        where.append("h.subject_id=?")
         params.append(subject_id)
     if source:
         where.append("c.source_id=?")
@@ -48,8 +47,9 @@ def _live(*, q=None, theme=None, subject_id=None, source=None):
     return f"""WITH live AS (
         SELECT e.canonical_event_id,e.canonical_name,e.event_class,e.taxonomy_version,
                e.resolution_deadline,e.subject_entity_id,
-               f.event_family_id AS subject_id,f.canonical_name AS subject_name,
-               coalesce(nullif(f.category,''),'unclassified') AS theme_id,
+               h.subject_id,h.subject_name,coalesce(h.theme_id,'unclassified') AS theme_id,
+               h.assignment_status,h.review_status,h.model_id,h.similarity,h.margin,
+               f.event_family_id,f.canonical_name AS event_family_name,
                count(DISTINCT c.source_contract_id) AS contract_count,
                count(DISTINCT c.source_id) AS source_count,
                string_agg(DISTINCT c.source_id,',' ORDER BY c.source_id) AS sources,
@@ -58,6 +58,7 @@ def _live(*, q=None, theme=None, subject_id=None, source=None):
         JOIN er_event_mappings m USING(canonical_event_id)
         JOIN er_source_contracts c USING(source_contract_id)
         LEFT JOIN er_event_families f USING(event_family_id)
+        LEFT JOIN er_hierarchy_current h ON h.canonical_event_id=e.canonical_event_id AND h.input_hash=sha256(e.canonical_name)
         LEFT JOIN er_market_current_state s USING(source_contract_id)
         WHERE {' AND '.join(where)}
         GROUP BY ALL
@@ -79,12 +80,16 @@ def summary(source: Optional[str] = Query(None, max_length=100)):
     """Current coverage and descriptive data gaps, without reading historical ticks."""
     con = db_read()
     try:
+        con.execute("BEGIN")
         cte, params = _live(source=source)
         coverage = rows_dict(con.execute(cte + """
             SELECT count(*) AS events,count(DISTINCT subject_id) AS subjects,
                    count(DISTINCT theme_id) AS themes,
                    count(*) FILTER (WHERE theme_id IN ('other','unclassified')) AS uncategorized_events,
-                   count(*) FILTER (WHERE subject_id IS NULL) AS events_without_family,
+                   count(*) FILTER (WHERE event_family_id IS NULL) AS events_without_family,
+                   count(*) FILTER (WHERE assignment_status='pending_inference' OR subject_id IS NULL) AS pending_hierarchy_events,
+                   count(*) FILTER (WHERE assignment_status='abstained') AS abstained_hierarchy_events,
+                   count(*) FILTER (WHERE review_status='human_reviewed') AS reviewed_hierarchy_events,
                    count(*) FILTER (WHERE subject_entity_id IS NOT NULL) AS formal_subject_events,
                    count(*) FILTER (WHERE source_count>1) AS cross_source_events,
                    max(latest_received_at) AS latest_received_at
@@ -110,7 +115,7 @@ def summary(source: Optional[str] = Query(None, max_length=100)):
             "as_of": datetime.now(timezone.utc), "source_filter": source,
             "coverage": coverage, "themes": themes, "sources": sources,
             "reference": {**reference, "entities": entities}, "definitions": DEFINITIONS,
-            "basis": "Current active canonical events and active source contracts; current taxonomy. Not an as-known historical snapshot.",
+            "basis": "Current active events and source contracts; persisted semantic subject/theme mappings. Provisional model assignments require independent validation; historical hierarchy is available at /v1/hierarchy/events/{id}?at=... .",
         }
     finally:
         con.close()
@@ -149,7 +154,7 @@ def subjects(
     after: Optional[str] = Query(None, max_length=200),
     limit: int = Query(30, ge=1, le=100),
 ):
-    """Discover event families and their theme assignments across all live events."""
+    """Discover governed semantic subjects across all live events."""
     con = db_read()
     try:
         cte, params = _live(q=q, theme=theme, source=source)
@@ -171,13 +176,14 @@ def subjects(
 
 @router.get("/events/{event_id}/mappings")
 def mappings(event_id: str, include_expired: bool = False):
-    """Trace a selected event to its family, category, contracts and mention evidence.
+    """Trace an event's persisted semantic hierarchy, contracts and mention evidence.
 
     Expired contract mappings are available for audit, but are never used to compute
-    current probability comparisons. Family/category values remain current taxonomy.
+    current probability comparisons. Hierarchy history has its own point-in-time route.
     """
     con = db_read()
     try:
+        con.execute("BEGIN")
         found = rows_dict(con.execute("""
             SELECT * FROM er_canonical_events WHERE canonical_event_id=?
         """, [event_id]))
@@ -188,11 +194,18 @@ def mappings(event_id: str, include_expired: bool = False):
             SELECT * FROM er_event_families WHERE event_family_id=?
         """, [event["event_family_id"]]))
         subject = family[0] if family else None
-        family_versions = rows_dict(con.execute("""
-            SELECT version_no,method,method_version,review_status,valid_from,valid_to
-            FROM er_event_family_versions WHERE event_family_id=?
-            ORDER BY version_no DESC LIMIT 1
-        """, [event["event_family_id"]]))
+        hierarchy = rows_dict(con.execute("SELECT * FROM er_hierarchy_current WHERE canonical_event_id=?", [event_id]))
+        hierarchy_mapping = hierarchy[0] if hierarchy else None
+        if hierarchy_mapping:
+            import json
+            from institutional_semantic_model import digest
+            hierarchy_mapping["input_is_current"] = hierarchy_mapping["input_hash"] == digest(event["canonical_name"])
+            hierarchy_mapping["evidence"] = json.loads(hierarchy_mapping.pop("evidence_json"))
+            override_id = hierarchy_mapping["evidence"].get("override_id")
+            review = rows_dict(con.execute("SELECT override_id,reviewer,reason,valid_from,valid_to FROM er_hierarchy_overrides WHERE override_id=?", [override_id])) if override_id else []
+            hierarchy_mapping["review"] = review[0] if review else None
+            raw_output = hierarchy_mapping.pop("output_json", None)
+            hierarchy_mapping["model_output"] = json.loads(raw_output) if raw_output else None
         current = "" if include_expired else "AND m.valid_from<=now() AND m.valid_to IS NULL"
         contracts = rows_dict(con.execute(f"""
             SELECT m.mapping_id,m.mapping_type,m.confidence,m.mapping_method,m.method_version,
@@ -234,12 +247,14 @@ def mappings(event_id: str, include_expired: bool = False):
         source_ids = sorted({c["source_id"] for c in current_contracts})
         # No range is called cross-source unless at least two distinct venues supply a price.
         priced_sources = {c["source_id"] for c in current_contracts if c["displayed_probability"] is not None}
-        theme_id = (subject.get("category") if subject else None) or "unclassified"
+        theme_id = hierarchy_mapping["theme_id"] if hierarchy_mapping else "unclassified"
+        semantic_subject = {"subject_id": hierarchy_mapping["subject_id"], "canonical_name": hierarchy_mapping["subject_name"]} if hierarchy_mapping else None
         return {
-            "as_of": datetime.now(timezone.utc), "event": event, "subject": subject,
-            "theme": {"theme_id": theme_id, "assignment": "stored_family_category",
-                      "family_version": family_versions[0] if family_versions else None,
-                      "event_class": event["event_class"], "taxonomy_version": event["taxonomy_version"]},
+            "as_of": datetime.now(timezone.utc), "event": event, "subject": semantic_subject,
+            "event_family": subject, "hierarchy_mapping": hierarchy_mapping,
+            "theme": {"theme_id": theme_id, "assignment": "versioned_governed_subject_parent",
+                      "taxonomy_version": hierarchy_mapping["taxonomy_version"] if hierarchy_mapping else None,
+                      "event_class": event["event_class"], "legacy_taxonomy_version": event["taxonomy_version"]},
             "source_contracts": contracts, "entity_mentions": mentions,
             "insights": {
                 "current_contract_count": len(current_contracts), "source_ids": source_ids,
@@ -250,7 +265,7 @@ def mappings(event_id: str, include_expired: bool = False):
                 "note": "Descriptive current observations only. Family membership and entity mentions do not establish event equivalence or security exposure.",
             },
             "definitions": DEFINITIONS, "include_expired": include_expired,
-            "basis": "Current taxonomy and latest per-contract observations, including on expired mappings when requested. Use /as-known or /history-point-in-time for historical reconstruction.",
+            "basis": "Persisted current semantic hierarchy and latest per-contract observations. Expired contract mappings retain current observations. Use /v1/hierarchy/events/{id}?at=... for hierarchy history and /history-point-in-time for observation history.",
         }
     finally:
         con.close()

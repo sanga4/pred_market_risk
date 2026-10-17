@@ -55,7 +55,7 @@ class EventRisk:
         })
 
     def explorer_subjects(self, *, q=None, theme=None, source=None, after=None, limit=30):
-        """Subjects are presentation aliases for existing event families."""
+        """Discover persisted semantic topics and their governed themes."""
         return self._get("/v1/explorer/subjects", {
             "q": q, "theme": theme, "source": source, "after": after, "limit": limit,
         })
@@ -64,6 +64,18 @@ class EventRisk:
         return self._get(f"/v1/explorer/events/{event_id}/mappings", {
             "include_expired": str(include_expired).lower(),
         })
+
+    def hierarchy_metrics(self):
+        return self._get("/v1/hierarchy/metrics")
+
+    def hierarchy_taxonomy(self, *, version=None):
+        return self._get("/v1/hierarchy/taxonomy", {"version": version})
+
+    def event_hierarchy(self, event_id: str, *, at=None):
+        return self._get(f"/v1/hierarchy/events/{event_id}", {"at": self._time(at)})
+
+    def hierarchy_review_queue(self, *, after=None, limit=50, abstained_only=True):
+        return self._get("/v1/hierarchy/review", {"after": after, "limit": limit, "abstained_only": str(abstained_only).lower()})
 
     def events(self, *, family_id=None, status="active", category=None, include_unserved=False, limit=100, offset=0):
         return self._get("/v1/events", {
