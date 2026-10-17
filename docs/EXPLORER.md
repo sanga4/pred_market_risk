@@ -2,16 +2,18 @@
 
 The institutional service serves the barebones UI at `/explorer`. It uses the same-origin,
 authenticated `/v1/explorer` endpoints. There is no frontend build, extra production
-dependency, embedded customer key, warehouse credential, new database schema or ingestion
-process. Existing retail deployment and institutional API contracts remain available.
+dependency, embedded customer key or warehouse credential. A separate enrichment lane persists the
+versioned semantic hierarchy; the public service remains read-only. Existing retail deployment
+and institutional source/identity contracts remain available. See [HIERARCHY.md](HIERARCHY.md).
 
 ## Hierarchy and definitions
 
 | UI concept | Existing data | Meaning / limit |
 | --- | --- | --- |
 | Event | `er_canonical_events` + live mappings + active source contracts | A source-backed, currently active canonical outcome. |
-| Subject | `er_event_families` | A grouping of related questions/horizons. A presentation alias, not `subject_entity_id`. Family membership is not proof of event equivalence. |
-| Theme | Family `category` | Stored rule-based taxonomy. Preserves `other`, `unclassified`, absent metadata and event-class disagreements. |
+| Subject | `er_hierarchy_event_subject_mappings` → `er_hierarchy_subjects` | Primary semantic topic from a pinned transformer or reviewed override; uncertainty is explicit. |
+| Theme | `er_hierarchy_subject_theme_mappings` → `er_hierarchy_themes` | Immutable governed parent of a subject, within a taxonomy version. |
+| Event family | `er_event_families` | Separate group of related questions/horizons; does not establish outcome equivalence. |
 | Named mention | `er_graph_edges` + `er_edge_evidence` + `er_entities` | Current source-asserted `mentions` with evidence. Never promoted to formal subject, issuer or causal exposure. |
 | Security | `er_instrument_reference_current` | Separate reference universe; no exposure mapping is implied. |
 
@@ -29,14 +31,13 @@ All routes below require the existing `read` scope when production authenticatio
 | --- | --- |
 | `GET /v1/explorer/summary` | Optional `source`. Global live coverage, theme counts, source health, instrument coverage and definitions. |
 | `GET /v1/explorer/events` | `q`, `theme`, `subject_id`, `source`, `after`, `limit` (1–100). `items`, `count`, `next_after`, `as_of`. |
-| `GET /v1/explorer/subjects` | `q`, `theme`, `source`, `after`, `limit` (1–100). Families and live matching event/contract counts, same page envelope. |
-| `GET /v1/explorer/events/{event_id}/mappings` | Optional `include_expired`. Event → family → category, mapping rows, per-contract current observations, named mention evidence and descriptive insights. |
+| `GET /v1/explorer/subjects` | `q`, `theme`, `source`, `after`, `limit` (1–100). Semantic topics and live matching event/contract counts, same page envelope. |
+| `GET /v1/explorer/events/{event_id}/mappings` | Optional `include_expired`. Event → semantic subject → governed theme, mapping rows, per-contract current observations, named mention evidence and descriptive insights. |
 
-Search is case-insensitive literal substring search over canonical event/family names or an
+Search is case-insensitive literal substring search over canonical event, semantic topic or family names or an
 exact event ID. It does not execute user SQL or treat `%`/`_` as wildcards. Source filters
 are applied before aggregation. Paging is by stable EventRisk ID. Pages are separate live
-reads; ingestion can change membership between requests. No claim of snapshot isolation is
-made across pages or summary panels.
+reads; ingestion can change membership between requests. Summary and quality metrics each use one database snapshot. Pages and panels are separate live reads.
 
 Discovery reads `er_market_current_state` instead of scanning the observation-history views.
 `received_at` describes the current material observation; `last_polled_at` is also exposed
@@ -48,6 +49,11 @@ The existing `/source-comparison` summary now counts distinct sources in `source
 and separately exposes `priced_source_count` and `priced_contract_count`. Previously,
 multiple priced contracts from one venue could be mislabeled as multiple sources.
 
+The hierarchy routes `/v1/hierarchy/metrics`, `/taxonomy`, `/events/{id}?at=...`,
+`/review`, `/review-datasets` and `/review-datasets/{id}` use the same authentication.
+The UI shows provenance, candidates, processing-time history, a review queue and measured quality.
+Missing independent production precision/recall are displayed as unavailable.
+
 ## UI behavior and credentials
 
 The UI shell and CSS/JS are public; data remains behind the existing API-key boundary.
@@ -58,7 +64,7 @@ or credential-bearing URL is used. The page applies a restrictive CSP and preven
 The API inspector retains at most 30 request/response records in the current tab; cURL
 examples contain a placeholder instead of the key.
 
-## Audit findings, 16 October 2026
+## Original audit findings, 16 October 2026 (before semantic upgrade)
 
 Reviewed product contracts, all Python files structurally (186 before this change), the
 59-migration schema, active implementation paths and test coverage. Inspected the live
@@ -69,9 +75,7 @@ open critical quality issues. The duplicate empty Railway project was left untou
 Important product gaps remain visible rather than being silently filled:
 
 - Formal `subject_entity_id` was empty on all 603,597 canonical records at the initial audit.
-  The UI's families-as-subjects convention makes existing data browsable; it does not solve
-  semantic role extraction. A true named-subject layer needs a separately specified,
-  evidenced and versioned normalization pipeline.
+  The original UI used families as a presentation alias. The new hierarchy replaces that alias with semantic topics. Named-entity role extraction remains separate.
 - The entity master contained 12 active seed entities and approximately 33,000 current
   source-asserted mention edges. This is limited alias coverage, not a full entity universe.
 - Roughly 84% of canonical events had event class `other`. Much of the full source universe

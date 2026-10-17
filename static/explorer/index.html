@@ -27,7 +27,8 @@
     <div id="error" role="alert" hidden></div>
     <section id="workspace" hidden>
       <div id="stats" class="stats" aria-label="Live coverage"></div>
-      <details class="definitions"><summary>What do subjects and themes mean here?</summary><p>Subjects are the API's existing <strong>event families</strong>, grouping related questions or horizons. Themes are their <strong>stored family categories</strong>. These are current taxonomy assignments. Named entity mentions appear separately; they do not fill the formal subject field. This first view stops at themes.</p></details>
+      <details class="definitions"><summary>What do subjects and themes mean here?</summary><p>Subjects are <strong>semantic topics</strong> inferred by a pinned sentence transformer, with explicit abstention when uncertain. Each subject has one <strong>governed theme</strong> in a versioned catalog. Event families and named entity mentions remain separate. Model assignments are provisional until independently reviewed. Similarity scores are not probabilities. This view stops at themes.</p></details>
+      <details class="definitions" id="quality-panel"><summary>Mapping quality &amp; validation</summary><p class="notice">Provisional model. Independent production precision and recall require a blinded, human-reviewed test set.</p><button id="quality-refresh" type="button">Refresh mapping metrics</button><button id="review-download" type="button">Download blinded review sample</button><p id="review-download-status" class="muted" role="status"></p><div id="quality" aria-live="polite">Connect to view measured coverage, stability and benchmark results.</div></details>
       <form id="filters" class="filters" role="search">
         <label>Search events or subjects<input id="search" type="search" maxlength="200" placeholder="e.g. Fed, Iran, recession"></label>
         <label>Source<select id="source"><option value="">All sources</option></select></label>
@@ -36,14 +37,15 @@
       </form>
       <div class="columns">
         <section class="panel" aria-labelledby="events-heading"><div class="panel-head"><h2 id="events-heading">1. Events</h2><span id="events-count" class="muted"></span></div><div id="events" class="list" aria-live="polite"></div><div class="pager"><button id="events-prev" disabled>Previous</button><button id="events-next" disabled>Next</button><span class="muted">Stable ID order</span></div></section>
-        <section class="panel" aria-labelledby="subjects-heading"><div class="panel-head"><h2 id="subjects-heading">2. Subjects</h2><span class="muted">Event families</span></div><div id="subjects" class="list" aria-live="polite"></div><div class="pager"><button id="subjects-prev" disabled>Previous</button><button id="subjects-next" disabled>Next</button></div></section>
+        <section class="panel" aria-labelledby="subjects-heading"><div class="panel-head"><h2 id="subjects-heading">2. Subjects</h2><span class="muted">Semantic topics</span></div><div id="subjects" class="list" aria-live="polite"></div><div class="pager"><button id="subjects-prev" disabled>Previous</button><button id="subjects-next" disabled>Next</button></div></section>
         <section class="panel" aria-labelledby="themes-heading"><div class="panel-head"><h2 id="themes-heading">3. Themes</h2><button id="all-themes">All</button></div><div id="themes" class="list"></div><p class="panel-note">Choose a theme or subject to filter events. Counts reflect live active events, with the source filter applied.</p></section>
       </div>
       <section id="detail" class="detail" aria-live="polite"><p class="muted">Select an event to trace every mapping and inspect its source observations.</p></section>
+      <details class="definitions"><summary>Uncertain mappings for review</summary><p>Review candidates need human judgment. Viewing candidates does not create independent gold labels.</p><button id="review-load" type="button">Load review queue</button><div id="review-queue" class="list" aria-live="polite"></div></details>
       <section class="insights"><h2>Coverage insights</h2><ul id="insights"></ul><p id="snapshot" class="muted"></p></section>
     </section>
     <details id="api-inspector" class="inspector"><summary>API calls <span id="call-count">0</span></summary><p class="muted">Requests from this tab, newest first. Select a request for its JSON response. cURL examples use a placeholder for your key.</p><div class="inspector-grid"><div id="calls" class="call-list"></div><div><div class="response-head"><strong id="response-title">Select a request</strong><button id="copy-curl" disabled>Copy cURL</button></div><pre id="response" tabindex="0">No requests selected.</pre></div></div></details>
   </main>
-  <footer>Kalshi · Polymarket · Current taxonomy. Probabilities remain source observations. <a href="/docs">Point-in-time endpoints</a> support historical research.</footer>
+  <footer>Kalshi · Polymarket · Versioned semantic hierarchy. Probabilities remain source observations. <a href="/docs">Point-in-time endpoints</a> support historical research.</footer>
 </body>
 </html>

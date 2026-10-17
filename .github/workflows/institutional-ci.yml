@@ -37,6 +37,7 @@ jobs:
             institutional_reference_versions.py institutional_reference_versions_v2.py institutional_security_master_sync.py \
             institutional_qa.py institutional_qa_v2.py institutional_qa_v3.py institutional_qa_v4.py institutional_qa_v5.py institutional_qa_v6.py institutional_qa_v7.py institutional_qa_v8.py institutional_qa_v9.py institutional_qa_v10.py institutional_qa_v11.py \
             institutional_readiness.py institutional_readiness_v2.py institutional_readiness_v3.py institutional_readiness_v4.py institutional_readiness_v5.py institutional_readiness_v6.py institutional_readiness_api.py \
+            institutional_semantic_model.py institutional_hierarchy_schema.py institutional_hierarchy_worker.py institutional_hierarchy_metrics.py institutional_hierarchy_evaluate.py institutional_hierarchy_admin.py institutional_hierarchy_queries.py institutional_hierarchy_api.py ops/hierarchy_flight.py \
             institutional_api.py institutional_curve_api.py institutional_changefeed_api.py institutional_ops_api.py institutional_public_queries_api.py institutional_explorer_api.py \
             institutional_history_api.py institutional_admin_api.py institutional_auth.py \
             institutional_stream.py institutional_exports.py institutional_exports_v2.py institutional_exports_v3.py institutional_exports_v4.py \
@@ -59,3 +60,21 @@ jobs:
         run: npm ci --prefix tests/ui --ignore-scripts --no-audit --no-fund
       - name: Exercise explorer interactions
         run: npm test --prefix tests/ui
+
+  semantic-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .
+      EVENTRISK_RUN_SEMANTIC_INTEGRATION: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned inference and test dependencies
+        run: pip install -r requirements-semantic.txt -r requirements-dev.txt
+      - name: Check dependency resolution
+        run: python -m pip check
+      - name: Verify pinned model and frozen challenge predictions
+        run: python -m pytest -q tests/test_semantic_integration.py

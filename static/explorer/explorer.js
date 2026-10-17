@@ -105,7 +105,7 @@
     $("connection-message").textContent = "Disconnected. Enter an existing read key to load live data.";
     calls = []; selectedCall = null; renderCalls(); renderResponse();
     $("events").replaceChildren(); $("subjects").replaceChildren(); $("themes").replaceChildren();
-    $("stats").replaceChildren(); $("insights").replaceChildren();
+    $("stats").replaceChildren(); $("insights").replaceChildren(); $("quality").replaceChildren(); $("review-queue").replaceChildren(); $("review-download-status").textContent = "";
     theme = subject = subjectName = ""; clearPages(); clearDetail();
   }
   function handleError(error) {
@@ -116,8 +116,8 @@
     if (!summary) return;
     const c = summary.coverage;
     $("stats").replaceChildren(...[
-      [c.events, "Active events"], [c.subjects, "Subjects / event families"],
-      [c.themes, "Stored themes"], [c.cross_source_events, "Events across 2+ sources"],
+      [c.events, "Active events"], [c.subjects, "Semantic subjects"],
+      [c.themes, "Governed themes"], [c.cross_source_events, "Events across 2+ sources"],
     ].map(([value, label]) => {
       const box = node("div", null, "stat"); box.append(node("strong", fmt(value)), node("span", label)); return box;
     }));
@@ -130,12 +130,12 @@
     }));
     const fraction = c.events ? (c.uncategorized_events / c.events * 100).toFixed(1) : "0.0";
     const insights = [
-      `${fmt(c.uncategorized_events)} events (${fraction}%) belong to “other” or “unclassified” themes. These categories include uncovered topics; they are not an error count.`,
+      `${fmt(c.uncategorized_events)} events (${fraction}%) are unclassified. ${fmt(c.abstained_hierarchy_events)} model decisions abstained; ${fmt(c.pending_hierarchy_events)} await current inference. These counts do not measure accuracy.`,
       `${fmt(c.cross_source_events)} canonical events have active mappings across multiple sources. Related family members remain distinct outcomes, not interchangeable probabilities.`,
-      `${fmt(c.formal_subject_events)} live events have a formal subject entity. The ${fmt(c.subjects)} subjects shown above are event families; ${fmt(summary.reference.entities)} active named entities are available separately for mention evidence.`,
+      `${fmt(c.reviewed_hierarchy_events)} live assignments have been human reviewed. ${fmt(summary.reference.entities)} named entities are available separately for mention evidence; semantic subjects are topics.`,
       `${fmt(summary.reference.instruments)} reference securities exist; ${fmt(summary.reference.instruments_with_issuer)} have an established issuer entity. Security exposure mappings require a separate evidenced model.`,
     ];
-    if (c.events_without_family) insights.push(`${fmt(c.events_without_family)} active events have no event family; their subject mapping is missing.`);
+    if (c.events_without_family) insights.push(`${fmt(c.events_without_family)} active events have no legacy event family. Semantic topic assignments are tracked independently.`);
     $("insights").replaceChildren(...insights.map(text => node("li", text)));
     $("snapshot").textContent = `Summary loaded ${date(summary.as_of)}. Lists are separate live reads. ${summary.basis}`;
   }
@@ -146,7 +146,7 @@
       const button = node("button", null, "list-row");
       button.dataset.eventId = item.canonical_event_id;
       button.setAttribute("aria-pressed", String(item.canonical_event_id === selectedEvent));
-      button.append(node("strong", item.canonical_name), node("small", `${item.subject_name || "No subject mapped"} → ${human(item.theme_id)}`), node("small", `${item.sources} · ${fmt(item.contract_count)} contract(s) · received ${date(item.latest_received_at)}`));
+      button.append(node("strong", item.canonical_name), node("small", `${item.subject_name || "Pending inference"} → ${human(item.theme_id)} · ${human(item.assignment_status || "pending_inference")}`), node("small", `${item.sources} · ${fmt(item.contract_count)} contract(s) · received ${date(item.latest_received_at)}`));
       button.onclick = () => selectEvent(item.canonical_event_id);
       return button;
     }));
@@ -218,8 +218,8 @@
     const path = node("div", null, "mapping-path");
     for (const [label, name, id] of [
       ["1. Event", data.event.canonical_name, data.event.canonical_event_id],
-      ["2. Subject / event family", data.subject?.canonical_name || "No subject mapped", data.subject?.event_family_id || "Missing family"],
-      ["3. Theme / family category", human(data.theme.theme_id), data.theme.family_version?.method_version || "Stored category; no version metadata available"],
+      ["2. Semantic subject", data.subject?.canonical_name || "Pending inference", data.subject?.subject_id || "No current assignment"],
+      ["3. Governed theme", human(data.theme.theme_id), data.theme.taxonomy_version || "No hierarchy version available"],
     ]) {
       const box = node("div", null, "mapping-step"); box.append(node("span", label), node("strong", name), node("div", id, "id")); path.append(box);
     }
@@ -228,10 +228,32 @@
     const lines = [
       `${fmt(insight.current_contract_count)} active contract(s) across ${insight.source_ids.join(", ") || "no active sources"}. Resolution deadline: ${date(data.event.resolution_deadline)}.`,
       insight.probability_range == null ? "A cross-source probability comparison is unavailable: fewer than two distinct sources supply a current price." : `Observed price range across distinct sources: ${(insight.probability_range * 100).toFixed(1)} percentage points. This is descriptive; mapping and resolution rules require inspection.`,
-      `Event class: ${human(data.event.event_class)}; family theme: ${human(data.theme.theme_id)}. ${insight.theme_needs_review ? "The stored theme is broad or unclassified." : "Classification uses stored taxonomy."}`,
+      `Assignment: ${human(data.hierarchy_mapping?.assignment_status || "pending_inference")}; review: ${human(data.hierarchy_mapping?.review_status || "unreviewed")}. Legacy event family: ${data.event_family?.canonical_name || "None"}.${data.hierarchy_mapping?.input_is_current === false ? " Title changed: this path is stale and awaits projection." : ""}`,
     ];
     notes.append(...lines.map(line => node("li", line)));
-    root.replaceChildren(top, path, notes, node("h3", "Source contracts & observations"));
+    root.replaceChildren(top, path, notes);
+    const mapping = data.hierarchy_mapping;
+    if (mapping) {
+      const evidence = node("details", null, "evidence"); evidence.append(node("summary", "Semantic mapping evidence & model provenance"));
+      const dl = node("dl");
+      for (const [label, value] of [["Mapping ID", mapping.mapping_id], ["Model", mapping.model_id], ["Validation", mapping.model_validation_status], ["Method", mapping.method_version], ["Input SHA256", mapping.input_hash], ["Cosine similarity (not probability)", mapping.similarity == null ? "—" : Number(mapping.similarity).toFixed(3)], ["Top candidate margin", mapping.margin == null ? "—" : Number(mapping.margin).toFixed(3)], ["Decision reason", mapping.model_output?.reason || mapping.assignment_status], ["Valid from", date(mapping.valid_from)]]) dl.append(node("dt", label), node("dd", value));
+      evidence.append(dl, node("blockquote", mapping.evidence?.title || "No title evidence"));
+      for (const candidate of mapping.model_output?.top_candidates || []) evidence.append(node("div", `${human(candidate.subject_id)} · ${Number(candidate.similarity).toFixed(3)}`, "muted"));
+      root.append(evidence);
+    }
+    const history = node("details", null, "evidence"), historyForm = node("form", null, "filters"), historyLabel = node("label", "Hierarchy as known at (UTC)"), historyInput = node("input"), historyButton = node("button", "Load snapshot"), historyResult = node("p", "Select a time to inspect processing-time hierarchy history. Source observations above remain current.", "muted");
+    historyInput.type = "datetime-local"; historyInput.required = true; historyLabel.append(historyInput); historyForm.append(historyLabel, historyButton);
+    history.append(node("summary", "Inspect historical hierarchy"), historyForm, historyResult);
+    historyForm.onsubmit = async event => {
+      event.preventDefault(); const version = sessionVersion; historyButton.disabled = true;
+      try {
+        const result = await api(query(`/v1/hierarchy/events/${encodeURIComponent(data.event.canonical_event_id)}`, {at: historyInput.value + "Z"}));
+        if (version !== sessionVersion) return;
+        historyResult.textContent = `${result.mapping.subject_name} → ${result.mapping.theme_name} · ${human(result.mapping.assignment_status)} · valid from ${date(result.mapping.valid_from)}. ${result.basis}`;
+      } catch (error) { if (version === sessionVersion) historyResult.textContent = error.message; }
+      finally { historyButton.disabled = false; }
+    };
+    root.append(history, node("h3", "Source contracts & observations"));
     const wrap = node("div", null, "table-wrap"), table = node("table"), head = node("thead"), headRow = node("tr");
     for (const label of ["Source / contract", "Probability", "Bid / ask", "Spread", "Received", "Mapping"]) headRow.append(node("th", label));
     head.append(headRow); table.append(head);
@@ -286,11 +308,57 @@
       $("disconnect").hidden = $("refresh").hidden = false;
       $("connection-message").textContent = "Connected · read-only API · key held in this tab's memory";
       $("source").replaceChildren(new Option("All sources", ""), ...summary.sources.map(item => new Option(item.source_name || item.source_id, item.source_id)));
-      clearPages(); renderSummary(); await loadLists();
+      clearPages(); renderSummary(); await Promise.allSettled([loadLists(), loadQuality()]);
     } catch (error) {
       if (attempt !== epoch) return;
       key = ""; message(error.message); $("connection-message").textContent = "Connection failed. Check your API key and retry.";
     } finally { $("connect").disabled = false; }
+  };
+  async function loadQuality() {
+    if (!connected) return;
+    const version = sessionVersion; $("quality-refresh").disabled = true;
+    $("quality").textContent = "Loading mapping metrics…";
+    try {
+      const data = await api("/v1/hierarchy/metrics"); if (version !== sessionVersion) return;
+      const c = data.coverage, lines = [
+        `Measured ${date(data.measured_at)} · ${fmt(c.mapped_events)} / ${fmt(c.canonical_events)} canonical events have persisted paths. ${fmt(c.pending_events)} pending; ${fmt(c.abstained_events)} abstained; ${fmt(c.stale_input_events)} stale inputs.`,
+        `Integrity violations: ${fmt(Object.values(data.integrity).reduce((a, b) => a + Number(b), 0))}. Institutional validation: ${data.institutional_validation_ready ? "approved" : "blocked — " + (data.validation_gate.failed_controls || []).join(", ")}.`,
+        `Independent production precision: ${pct(data.production_precision)}; recall: ${pct(data.production_recall)}. Unavailable values require independently reviewed labels.`,
+      ];
+      const benchmark = data.evaluations.find(e => !e.metrics.is_independent_production_gold);
+      if (benchmark) {
+        const m = benchmark.metrics;
+        lines.push(`Authored challenge (${fmt(m.subject.n)} examples; not independent production gold): subject accuracy ${pct(m.subject.accuracy)}, macro precision ${pct(m.subject.macro_precision)}, macro recall ${pct(m.subject.macro_recall)}, macro F1 ${pct(m.subject.macro_f1)}; theme accuracy ${pct(m.theme.accuracy)}; abstention ${pct(m.abstention_rate)}.`, `Batch-size repeatability: ${pct(m.repeatability?.subject_agreement)} subject agreement on this challenge. Cosine scores are uncalibrated.`);
+      }
+      $("quality").replaceChildren(...lines.map(line => node("p", line)));
+    } catch (error) { if (version === sessionVersion) { $("quality").textContent = error.message; if (error.status === 401) handleError(error); } }
+    finally { $("quality-refresh").disabled = false; }
+  }
+  $("quality-refresh").onclick = loadQuality;
+  $("review-download").onclick = async () => {
+    if (!connected) return;
+    const version = sessionVersion; $("review-download").disabled = true;
+    try {
+      const datasets = await api("/v1/hierarchy/review-datasets"); if (version !== sessionVersion) return;
+      if (!datasets.items.length) { $("review-download-status").textContent = "No pending blinded review sample. An operator can export one with the hierarchy admin CLI."; return; }
+      const data = await api(`/v1/hierarchy/review-datasets/${encodeURIComponent(datasets.items[0].dataset_id)}`); if (version !== sessionVersion) return;
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}));
+      const link = node("a"); link.href = url; link.download = data.dataset_id + ".json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      $("review-download-status").textContent = "Blinded sample downloaded. Complete independent reviews before controlled import; instructions are in the JSON.";
+    } catch (error) { if (version === sessionVersion) handleError(error); }
+    finally { $("review-download").disabled = false; }
+  };
+  $("review-load").onclick = async () => {
+    if (!connected) return;
+    const version = sessionVersion; $("review-load").disabled = true;
+    try {
+      const data = await api("/v1/hierarchy/review?limit=30&abstained_only=true"); if (version !== sessionVersion) return;
+      $("review-queue").replaceChildren(...data.items.map(item => {
+        const button = node("button", null, "list-row"); button.append(node("strong", item.canonical_name), node("small", `${human(item.assignment_status)} · candidate: ${human(item.candidate_subject_id)}`)); button.onclick = () => selectEvent(item.canonical_event_id); return button;
+      }));
+      if (!data.items.length) $("review-queue").textContent = "No uncertain active assignments in this snapshot.";
+    } catch (error) { if (version === sessionVersion) handleError(error); }
+    finally { $("review-load").disabled = false; }
   };
   $("filters").onsubmit = event => { event.preventDefault(); subject = subjectName = ""; clearPages(); clearDetail(); loadLists(); };
   $("source").onchange = () => { subject = subjectName = ""; clearPages(); clearDetail(); loadLists(true); };

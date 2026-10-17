@@ -31,6 +31,7 @@ from institutional_changefeed_api import router as changefeed_router
 from institutional_curve_api import router as curve_router
 from institutional_explorer_api import router as explorer_router
 from institutional_history_api import router as history_router
+from institutional_hierarchy_api import router as hierarchy_router
 from institutional_public_queries_api import router as public_queries_router
 from institutional_readiness_api import router as readiness_router
 from institutional_stream import router as stream_router
@@ -230,6 +231,7 @@ app.include_router(history_router)
 app.include_router(readiness_router)
 app.include_router(stream_router)
 app.include_router(explorer_router)
+app.include_router(hierarchy_router)
 
 EXPLORER_DIR = Path(__file__).resolve().parent / "static" / "explorer"
 app.mount("/explorer-assets", StaticFiles(directory=EXPLORER_DIR), name="explorer-assets")

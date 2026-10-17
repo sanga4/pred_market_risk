@@ -7,10 +7,10 @@ const {JSDOM, VirtualConsole} = require('jsdom');
 const root = resolve(__dirname, '../..');
 const html = readFileSync(resolve(root, 'static/explorer/index.html'), 'utf8');
 const script = readFileSync(resolve(root, 'static/explorer/explorer.js'), 'utf8');
-const subject = {subject_id:'fam_1', subject_name:'Fed decisions', theme_id:'rates', event_count:2};
+const subject = {subject_id:'central_bank_rates', subject_name:'Fed decisions', theme_id:'rates', event_count:2};
 const event = {canonical_event_id:'evt_1', canonical_name:'Fed <img src=x onerror=alert(1)>?', subject_name:'Fed decisions', theme_id:'rates', sources:'kalshi', contract_count:1};
 const summary = {as_of:'2026-10-16T12:00:00Z', basis:'Current taxonomy.', coverage:{events:3,subjects:2,themes:1,cross_source_events:0,uncategorized_events:0,formal_subject_events:0}, themes:[{theme_id:'rates',event_count:3,subject_count:2}], sources:[{source_id:'kalshi',source_name:'Kalshi'}], reference:{instruments:7192,instruments_with_issuer:0,entities:12}};
-const mapping = {event:{...event,event_class:'rates'}, subject:{event_family_id:'fam_1',canonical_name:'Fed decisions'},theme:{theme_id:'rates'},insights:{source_ids:['kalshi'],current_contract_count:1,probability_range:null},source_contracts:[{source_id:'kalshi',current_title:event.canonical_name,source_url:'javascript:alert(1)',is_current:true,mapping_type:'source_native',review_status:'source_native',displayed_probability:0.4}],entity_mentions:[],include_expired:false,basis:'Current taxonomy.'};
+const mapping = {event:{...event,event_class:'rates'}, subject:{subject_id:'central_bank_rates',canonical_name:'Fed decisions'},event_family:{event_family_id:'fam_1',canonical_name:'Fed horizons'},hierarchy_mapping:{mapping_id:'hmap_1',assignment_status:'model_assigned_provisional',review_status:'unreviewed',model_validation_status:'provisional_not_independently_validated',similarity:.7,margin:.1,model_output:{reason:'test',top_candidates:[]}},theme:{theme_id:'rates',taxonomy_version:'v1'},insights:{source_ids:['kalshi'],current_contract_count:1,probability_range:null},source_contracts:[{source_id:'kalshi',current_title:event.canonical_name,source_url:'javascript:alert(1)',is_current:true,mapping_type:'source_native',review_status:'source_native',displayed_probability:0.4}],entity_mentions:[],include_expired:false,basis:'Current taxonomy.'};
 
 function setup(override) {
   const requests = [], errors = [];
@@ -23,6 +23,8 @@ function setup(override) {
     const special = override && await override(path, options);
     if (special) {body=special.body; status=special.status ?? 200;}
     else if(path === '/health') body={ok:true,sources:[]};
+    else if(path === '/v1/hierarchy/metrics') body={measured_at:'2026-10-17T12:00:00Z',coverage:{mapped_events:3,canonical_events:3,pending_events:0,abstained_events:1,stale_input_events:0},integrity:{duplicate:0},institutional_validation_ready:false,validation_gate:{failed_controls:['independent_production_gold_missing']},production_precision:null,production_recall:null,evaluations:[]};
+    else if(path.startsWith('/v1/hierarchy/review')) body={items:[{...event,assignment_status:'abstained',candidate_subject_id:'central_bank_rates'}]};
     else if(path.startsWith('/v1/explorer/summary')) body=summary;
     else if(path.startsWith('/v1/explorer/subjects')) body={items:[subject],count:1,next_after:null};
     else if(path.includes('/mappings')) body={...mapping,include_expired:path.includes('true')};
@@ -54,6 +56,8 @@ test('connects, traces mappings, renders source text safely and inspects API res
     assert.equal(app.dom.window.localStorage.length,0);
     assert.equal(app.dom.window.sessionStorage.length,0);
     assert.match(app.$('events').textContent,/<img src=x/);
+    assert.match(app.$('quality').textContent,/production precision: —; recall: —/);
+    assert.match(app.$('quality').textContent,/independent_production_gold_missing/);
     assert.equal(app.$('events').querySelector('img'),null);
     app.$('events').querySelector('button').click();
     await until(()=>!!app.$('detail').querySelector('table'));
@@ -79,7 +83,7 @@ test('theme, subject, search and keyset pagination issue the expected API filter
     assert.ok(app.requests.some(request=>request.path.includes('theme=rates')));
     app.$('subjects').querySelector('button').click();
     await until(()=>app.$('events').querySelector('button'));
-    assert.ok(app.requests.some(request=>request.path.includes('subject_id=fam_1')));
+    assert.ok(app.requests.some(request=>request.path.includes('subject_id=central_bank_rates')));
     app.$('events-next').click();
     await until(()=>app.$('events').querySelector('[data-event-id="evt_2"]'));
     assert.ok(app.requests.some(request=>request.path.includes('after=evt_1')));
@@ -117,5 +121,18 @@ test('disconnect prevents an in-flight response from repopulating private data',
     assert.equal(app.$('calls').textContent,'');
     assert.equal(app.$('response').textContent,'No requests selected.');
     assert.ok(!app.$('detail').textContent.includes('Fed'));
+  } finally {app.dom.window.close();}
+});
+
+ test('review queue loads persisted uncertain assignments',async()=>{
+  const app=setup();
+  try {
+    await app.connect(); app.$('review-load').click();
+    await until(()=>!!app.$('review-queue').querySelector('button'));
+    assert.match(app.$('review-queue').textContent,/abstained/);
+    app.$('review-queue').querySelector('button').click();
+    await until(()=>!!app.$('detail').querySelector('table'));
+    assert.match(app.$('detail').textContent,/Cosine similarity \(not probability\)/);
+    assert.equal(app.errors.length,0);
   } finally {app.dom.window.close();}
 });

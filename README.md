@@ -33,10 +33,11 @@ stable-ID pagination; select an event for contract mappings, current prices, val
 methodology and mention evidence. The API inspector shows request paths, timings, request
 IDs and JSON responses, with key-free cURL examples.
 
-In this first explorer, **subjects explicitly mean existing event families**, and **themes
-mean their stored family categories**. Named entity mentions and formal subject assignment
-remain distinct. Security impact/exposure is not inferred. See
-`docs/EXPLORER.md` for endpoint contracts, coverage gaps and acceptance instructions.
+The explorer now reads persisted **event → semantic subject → governed theme** mappings.
+A pinned sentence transformer assigns topics with explicit abstention; the catalog fixes
+each subject's theme. Event families remain separate. Quality, history and blinded review
+are built in. Model assignments remain provisional because independent production labels
+are still required. See [hierarchy design and metrics](docs/HIERARCHY.md).
 
 Operational health is available publicly at `/health`. The authenticated `/v1` surface includes events, point-in-time history and curves, source comparison, event families and term structure, entities, instruments, graph relationships, quality state, releases, and resumable change feeds. WebSocket streaming is exposed at `/v1/stream`.
 

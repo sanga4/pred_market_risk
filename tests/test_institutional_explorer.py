@@ -17,6 +17,8 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("EVENTRISK_API_KEY", "test-explorer-key")
     from institutional_migrations_v2 import ensure_schema
     ensure_schema()
+    from institutional_hierarchy_schema import ensure_schema as ensure_hierarchy, register_model
+    ensure_hierarchy(); register_model()
     con = db.connect()
     try:
         con.execute("""
@@ -59,6 +61,11 @@ def client(monkeypatch, tmp_path):
         """)
     finally:
         con.close()
+    from institutional_hierarchy_worker import infer, project
+    class Classifier:
+        def predict(self, texts):
+            return [{"subject_id": "central_bank_rates" if "Fed" in text else "unclassified", "theme_id": "rates" if "Fed" in text else "unclassified", "candidate_subject_id": "central_bank_rates", "similarity": .7, "margin": .1, "abstained": "Fed" not in text, "reason": "fixture", "top_candidates": []} for text in texts]
+    infer(classifier=Classifier()); project()
     monkeypatch.setenv("DB_FORCE_READ_WRITE", "false")
     with TestClient(service.app) as test_client:
         yield test_client
@@ -89,7 +96,7 @@ def test_summary_counts_current_active_coverage_without_history(client):
     result = get(client, "/v1/explorer/summary")
     assert result["coverage"]["events"] == 4
     assert result["coverage"]["subjects"] == 2
-    assert result["coverage"]["themes"] == 3
+    assert result["coverage"]["themes"] == 2
     assert result["coverage"]["cross_source_events"] == 1
     assert result["coverage"]["uncategorized_events"] == 2
     assert result["coverage"]["events_without_family"] == 1
@@ -107,25 +114,27 @@ def test_search_filters_and_keyset_pagination_cover_the_universe(client):
     assert second["next_after"] is None
     assert get(client, "/v1/explorer/events", q="Federal Reserve")["count"] == 2
     assert get(client, "/v1/explorer/events", q="%_'")["count"] == 0
-    result = get(client, "/v1/explorer/events", theme="rates", source="polymarket", subject_id="fam_1")
+    result = get(client, "/v1/explorer/events", theme="rates", source="polymarket", subject_id="central_bank_rates")
     assert result["count"] == 1
     assert result["items"][0]["source_count"] == 1
     assert result["items"][0]["sources"] == "polymarket"
     assert client.get("/v1/explorer/events?limit=0", headers=AUTH).status_code == 422
 
 
-def test_subjects_are_families_with_complete_mapping_counts(client):
+def test_subjects_are_semantic_topics_with_complete_mapping_counts(client):
     result = get(client, "/v1/explorer/subjects", theme="rates", limit=1)
-    assert result["items"][0]["subject_id"] == "fam_1"
+    assert result["items"][0]["subject_id"] == "central_bank_rates"
     assert result["items"][0]["event_count"] == 2
     assert result["items"][0]["contract_count"] == 3
-    assert "event family" in get(client, "/v1/explorer/summary")["definitions"]["subject"]
+    assert "semantic topic" in get(client, "/v1/explorer/summary")["definitions"]["subject"]
     assert get(client, "/v1/explorer/subjects", source="polymarket", theme="rates")["items"][0]["event_count"] == 1
 
 
 def test_mapping_lineage_preserves_evidence_and_excludes_expired_inferred_edges(client):
     result = get(client, "/v1/explorer/events/evt_1/mappings")
-    assert result["subject"]["event_family_id"] == "fam_1"
+    assert result["subject"]["subject_id"] == "central_bank_rates"
+    assert result["event_family"]["event_family_id"] == "fam_1"
+    assert result["theme"]["taxonomy_version"] == "eventrisk_semantic_topics_v1"
     assert result["theme"]["theme_id"] == "rates"
     assert {m["mapping_id"] for m in result["source_contracts"]} == {"map1", "map2", "map7"}
     assert result["insights"]["current_contract_count"] == 2
@@ -140,7 +149,8 @@ def test_mapping_lineage_preserves_evidence_and_excludes_expired_inferred_edges(
 
 def test_missing_mapping_and_one_source_are_reported_without_invented_links(client):
     orphan = get(client, "/v1/explorer/events/evt_4/mappings")
-    assert orphan["subject"] is None
+    assert orphan["subject"]["subject_id"] == "unclassified"
+    assert orphan["event_family"] is None
     assert orphan["theme"]["theme_id"] == "unclassified"
     assert orphan["insights"]["theme_needs_review"]
     assert orphan["insights"]["probability_range"] is None
